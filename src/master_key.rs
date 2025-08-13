@@ -4,8 +4,8 @@ pub struct MasterPK<M: PolyMatrix> {
     pub num_inputs: usize,
     pub packed_limbs: usize,
     pub seed: [u8; 32],
-    b_epsilon: M,
-    u: M,
+    pub b_epsilon: M,
+    pub u: M,
 }
 
 impl<M: PolyMatrix> MasterPK<M> {

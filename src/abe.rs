@@ -1,10 +1,15 @@
+use mxx::element::PolyElem;
 use mxx::{
-    bgg::sampler::BGGPublicKeySampler,
+    bgg::{
+        encoding::BggEncoding,
+        sampler::{BGGEncodingSampler, BGGPublicKeySampler},
+    },
     circuit::PolyCircuit,
     gadgets::crt::{CrtContext, CrtPoly},
     matrix::PolyMatrix,
     poly::{Poly, PolyParams},
     sampler::{DistType, PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler},
+    utils::create_bit_random_poly,
 };
 use std::{marker::PhantomData, sync::Arc};
 
@@ -38,7 +43,7 @@ impl<
     M: PolyMatrix,
     SH: PolyHashSampler<[u8; 32], M = M>,
     ST: PolyTrapdoorSampler<M = M>,
-    SU: PolyUniformSampler<M = M>,
+    SU: PolyUniformSampler<M = M> + Copy,
 > KeyPolicyABE<M, SH, ST, SU>
 {
     fn setup(
@@ -68,7 +73,8 @@ impl<
         mpk: MasterPK<M>,
         inputs: &[<M::P as Poly>::Elem],
         message: bool,
-    ) -> Ciphertext {
+        p_sigma: f64,
+    ) -> Ciphertext<M> {
         let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
         let num_packed_poly_inputs = total_limbs / mpk.packed_limbs;
         let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
@@ -98,15 +104,38 @@ impl<
             );
             crt_inputs.push(crt_poly);
         }
-        // 5. For every `i in 0..num_packed_poly_inputs`, make a packed polynomial `packed_inputs[i]` from the `packed_limbs` integers in `crt_inputs`.
-        // 6. Construct BGG+ encodings: `c_{1}:=s^T*(A_{1}-gadget) + e_{c_1},
-        //  c_{x_1}:=s^T * (A_{x_1} - packed_inputs[1]*gadget) + e_{c_{x_1}}, ..., c_{x_{num_packed_poly_inputs-1}}:=s^T * (A_{x_{num_packed_poly_inputs-1}} - packed_inputs[1]*gadget) + e_{c_{x_{num_packed_poly_inputs-1}}}`
-        //, which can be sampled through `BGGEncodingSampler`.
-        // 7. Compute `c_{b_{\epsilon}} := s^{T} * B_{\epsilon} + e_{c_{b_{\epsilon}}}`.
-        // 8. Compute `c_{u} := s^{T} * u + e_{c_{u}} + \frac{q}{2}\mu`.
-        // 9. Output `ct: Ciphertext := {c_{1}, c_{x_1}, \dots, c_{x_{num_packed_poly_inputs-1}}, c_{b_{\epsilon}}, c_{u}}`.
+        // todo: 5. For every `i in 0..num_packed_poly_inputs`, make a packed polynomial `packed_inputs[i]` from the `packed_limbs` integers in `crt_inputs`.
+        let mut packed_inputs: Vec<M::P> = Vec::with_capacity(num_packed_poly_inputs);
 
-        todo!()
+        let s_bar = self
+            .uniform_sampler
+            .sample_uniform(&params, 1, self.d, DistType::BitDist);
+        let bgg_sampler =
+            BGGEncodingSampler::new(&params, &s_bar.get_row(0), self.uniform_sampler, p_sigma);
+        let bgg_encodings = bgg_sampler.sample(&params, &pubkeys, &packed_inputs);
+        let c_b_epsilon_error = self.uniform_sampler.sample_uniform(
+            &params,
+            1,
+            self.d * (2 + params.modulus_digits()),
+            DistType::GaussDist { sigma: p_sigma },
+        );
+        let c_b_epsilon = s_bar.clone() * mpk.b_epsilon + c_b_epsilon_error;
+        let boolean_msg = if message {
+            <M::P as Poly>::Elem::one(&params.modulus())
+        } else {
+            <M::P as Poly>::Elem::zero(&params.modulus())
+        };
+        let scale = M::P::from_elem_to_constant(
+            &params,
+            &(<M::P as Poly>::Elem::half_q(&params.modulus()) * boolean_msg),
+        );
+        let c_u = (s_bar * mpk.u).get_row(0)[0].clone() + scale;
+
+        Ciphertext {
+            bgg_encodings,
+            c_b_epsilon,
+            c_u,
+        }
     }
 
     fn keygen(
