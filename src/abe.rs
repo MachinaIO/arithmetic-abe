@@ -110,6 +110,7 @@ impl<
         let s_bar = self
             .uniform_sampler
             .sample_uniform(&params, 1, self.d, DistType::BitDist);
+        // todo: gauss_sigma and p_sigma
         let bgg_sampler =
             BGGEncodingSampler::new(&params, &s_bar.get_row(0), self.uniform_sampler, p_sigma);
         let bgg_encodings = bgg_sampler.sample(&params, &pubkeys, &packed_inputs);
@@ -139,15 +140,44 @@ impl<
     }
 
     fn keygen(
+        &self,
         params: <M::P as Poly>::Params,
         mpk: MasterPK<M>,
         msk: MasterSK<M, ST>,
         circuit: ArithmeticCircuit,
     ) -> FuncSK {
+        // 1. Convert `arith_circuit` into `poly_circuit: PolyCircuit` in the way described above.
+        // 2. Reconstruct `A_{1}, A_{x_{0}}, \dots, A_{x_{num_packed_poly_inputs-1}}` from `seed` with the hash sampler.
+        let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
+        let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
+        let num_packed_poly_inputs = total_limbs / mpk.packed_limbs;
+        let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
+        let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
+        // 3. Evaluate `poly_circuit` on the above BGG+ public matrices. During this process, required preimages and matrices for every lookup gate should be generated.
+        // 4. Let `A_f` in $\mathcal{R}_{q}^{d \times m}$ be the BGG+ public matrix
+        // corresponding to the output wire of `poly_circuit`.
+        // Generate a preimage `u_f := [B_{\epsilon},A_f]^{-1}(u)`
+        // by calling the [`preimage_extend` function](https://github.com/MachinaIO/mxx/blob/main/src/sampler/trapdoor/sampler.rs#L159C8-L159C23).
+        // 5. Output the preimages/matrices generated in Step 3 along with `arith_circuit` and `A_f` as `fsk: FuncSk`.
+
         todo!()
     }
 
-    fn dec(params: <M::P as Poly>::Params, mpk: MasterPK<M>, fsk: FuncSK) -> bool {
+    fn dec(&self, params: <M::P as Poly>::Params, mpk: MasterPK<M>, fsk: FuncSK) -> bool {
+        // 2. Convert `arith_circuit` into `poly_circuit: PolyCircuit` in the way described above.
+        // 3. Reconstruct `A_{1}, A_{x_{0}}, \dots, A_{x_{num_packed_poly_inputs-1}}` from `seed` with the hash sampler.
+        let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
+        let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
+        let num_packed_poly_inputs = total_limbs / mpk.packed_limbs;
+        let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
+        let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
+        // 4. Evaluate `poly_circuit` on the above BGG+ public matrices.
+        // 5. Let `c_f := s^T*A_f + e_{c_f}` in $\mathcal{R}_{q}^{1 \times m}$
+        // be the BGG+ encoding corresponding to the output wire of `poly_circuit`.
+        // Compute `v := (c_{B_{\epsilon}}, c_f) * u_f = s^{T} * u + e_{c_f} * u_f`.
+        // 6. Compute `z = c_{u} - v = e_{c_{u}} - e_{c_f} * u_f + \frac{q}{2}\mu`.
+        // 7. Output `\mu=1` if the constant term of `z` is larger than the threshold and `\mu=0` otherwise.
+
         todo!()
     }
 }
