@@ -57,6 +57,7 @@ impl<
             (num_inputs * self.num_crt_limbs * self.crt_depth) / packed_limbs;
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(seed, self.d);
         let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
+        // todo: we don't need `pubkeys` in here, do we need to sample on here?
         let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
         let (b_epsilon_trapdoor, b_epsilon) = self.trapdoor_sampler.trapdoor(&params, self.d);
         let u = self
@@ -105,6 +106,9 @@ impl<
             crt_inputs.push(crt_poly);
         }
         // todo: 5. For every `i in 0..num_packed_poly_inputs`, make a packed polynomial `packed_inputs[i]` from the `packed_limbs` integers in `crt_inputs`.
+        // todo: so not sure how i can connect from `CrtPoly` to packed inputs
+        // bcs current Crt implementation is around defined on top of PolyCircuit, but later we need to use packed_inputs for BggEncoding
+        // So not sure how to connect two step.
         let mut packed_inputs: Vec<M::P> = Vec::with_capacity(num_packed_poly_inputs);
 
         let s_bar = self
