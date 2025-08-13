@@ -1,10 +1,12 @@
 use mxx::{
     bgg::sampler::BGGPublicKeySampler,
+    circuit::PolyCircuit,
+    gadgets::crt::{CrtContext, CrtPoly},
     matrix::PolyMatrix,
     poly::{Poly, PolyParams},
     sampler::{DistType, PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler},
 };
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
     ciphertext::Ciphertext,
@@ -21,6 +23,7 @@ pub struct KeyPolicyABE<
     ST: PolyTrapdoorSampler<M = M>,
     SU: PolyUniformSampler<M = M>,
 > {
+    limb_bit_size: usize,
     num_crt_limbs: usize,
     crt_depth: usize,
     packed_limb: usize,
@@ -66,17 +69,39 @@ impl<
         inputs: &[<M::P as Poly>::Elem],
         message: bool,
     ) -> Ciphertext {
-        let num_packed_poly_inputs =
-            (mpk.num_inputs * self.num_crt_limbs * self.crt_depth) / mpk.packed_limbs;
+        let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
+        let num_packed_poly_inputs = total_limbs / mpk.packed_limbs;
         let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
         let s = self
             .uniform_sampler
             .sample_uniform(&params, self.d, 1, DistType::BitDist);
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
         let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
-        // 4. For every `i in 0..num_packed_poly_inputs`, decompose `inputs[i]` into the CRT representation + the big integer representation, stored in `crt_inputs[i*(num_crt_limbs*crt_depth)..(i+1)*(num_crt_limbs*crt_depth)]`.
+        let (moduli, crt_bits, _) = params.to_crt();
+        debug_assert_eq!(moduli.len(), self.crt_depth);
+        // 4. For every `i in 0..num_packed_poly_inputs`, decompose `inputs[i]`
+        // into the CRT representation + the big integer representation,
+        // stored in `crt_inputs[i*(num_crt_limbs*crt_depth)..(i+1)*(num_crt_limbs*crt_depth)]`.
+        let mut crt_inputs: Vec<CrtPoly<M::P>> = Vec::with_capacity(num_packed_poly_inputs);
+        let mut circuit = PolyCircuit::<M::P>::new();
+        let inputs = circuit.input(total_limbs);
+        let ctx = Arc::new(CrtContext::setup(&mut circuit, &params, self.limb_bit_size));
+        for i in 0..num_packed_poly_inputs {
+            // let target_input = inputs[i].value();
+            let crt_poly = CrtPoly::from_inputs_interleaved(
+                &mut circuit,
+                ctx.clone(),
+                &inputs,
+                self.num_crt_limbs,
+                i,
+                num_packed_poly_inputs,
+            );
+            crt_inputs.push(crt_poly);
+        }
         // 5. For every `i in 0..num_packed_poly_inputs`, make a packed polynomial `packed_inputs[i]` from the `packed_limbs` integers in `crt_inputs`.
-        // 6. Construct BGG+ encodings: `c_{1}:=s^T*(A_{1}-gadget) + e_{c_1}, c_{x_1}:=s^T * (A_{x_1} - packed_inputs[1]*gadget) + e_{c_{x_1}}, ..., c_{x_{num_packed_poly_inputs-1}}:=s^T * (A_{x_{num_packed_poly_inputs-1}} - packed_inputs[1]*gadget) + e_{c_{x_{num_packed_poly_inputs-1}}}`, which can be sampled through `BGGEncodingSampler`.
+        // 6. Construct BGG+ encodings: `c_{1}:=s^T*(A_{1}-gadget) + e_{c_1},
+        //  c_{x_1}:=s^T * (A_{x_1} - packed_inputs[1]*gadget) + e_{c_{x_1}}, ..., c_{x_{num_packed_poly_inputs-1}}:=s^T * (A_{x_{num_packed_poly_inputs-1}} - packed_inputs[1]*gadget) + e_{c_{x_{num_packed_poly_inputs-1}}}`
+        //, which can be sampled through `BGGEncodingSampler`.
         // 7. Compute `c_{b_{\epsilon}} := s^{T} * B_{\epsilon} + e_{c_{b_{\epsilon}}}`.
         // 8. Compute `c_{u} := s^{T} * u + e_{c_{u}} + \frac{q}{2}\mu`.
         // 9. Output `ct: Ciphertext := {c_{1}, c_{x_1}, \dots, c_{x_{num_packed_poly_inputs-1}}, c_{b_{\epsilon}}, c_{u}}`.
