@@ -5,7 +5,10 @@ use mxx::utils::log_mem;
 use mxx::{
     bgg::sampler::{BGGEncodingSampler, BGGPublicKeySampler},
     circuit::PolyCircuit,
-    gadgets::crt::{CrtContext, CrtPoly},
+    gadgets::{
+        crt::{CrtContext, CrtPoly},
+        lt_isolate::LtIsolateGadget,
+    },
     matrix::PolyMatrix,
     poly::{Poly, PolyParams},
     sampler::{DistType, PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler},
@@ -153,9 +156,11 @@ impl<
     ) -> FuncSK<M> {
         let ring_dim = params.ring_dimension() as usize;
         let k = arith_circuit.packed_limbs.saturating_sub(1);
-        let lt_isolate_id = arith_circuit
-            .original_circuit
-            .register_general_lt_isolate_lookup(&params, k);
+        let lt_isolate_id = LtIsolateGadget::register_general_lt_isolate_lookup(
+            &mut arith_circuit.original_circuit,
+            &params,
+            k,
+        );
         arith_circuit.to_poly_circuit(lt_isolate_id, ring_dim);
         log_mem("finish to_poly_circuit");
         let poly_circuit = arith_circuit.original_circuit.clone();
@@ -206,10 +211,11 @@ impl<
     ) -> bool {
         let ring_dim = params.ring_dimension() as usize;
         let k = fsk.arith_circuit.packed_limbs.saturating_sub(1);
-        let lt_isolate_id = fsk
-            .arith_circuit
-            .original_circuit
-            .register_general_lt_isolate_lookup(&params, k);
+        let lt_isolate_id = LtIsolateGadget::register_general_lt_isolate_lookup(
+            &mut fsk.arith_circuit.original_circuit,
+            &params,
+            k,
+        );
         fsk.arith_circuit.to_poly_circuit(lt_isolate_id, ring_dim);
         let poly_circuit = fsk.arith_circuit.original_circuit.clone();
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);

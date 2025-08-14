@@ -596,7 +596,7 @@ dependencies = [
 [[package]]
 name = "mxx"
 version = "0.1.0"
-source = "git+https://github.com/MachinaIO/mxx.git?branch=simplified-crt#134392c50ff8efb3f7b2302578a260eb6e1ac084"
+source = "git+https://github.com/MachinaIO/mxx.git?branch=simplified-crt#95f7d51f95ecd25bccc4b1ece709cdfbee9ef12b"
 dependencies = [
  "bincode",
  "bitvec",

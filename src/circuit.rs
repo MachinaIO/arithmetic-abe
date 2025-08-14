@@ -1,4 +1,4 @@
-use mxx::{circuit::PolyCircuit, poly::Poly};
+use mxx::{circuit::PolyCircuit, gadgets::lt_isolate::LtIsolateGadget, poly::Poly};
 
 #[derive(Clone)]
 pub struct ArithmeticCircuit<P: Poly> {
@@ -18,9 +18,7 @@ impl<P: Poly> ArithmeticCircuit<P> {
 
         let mut decomposed_outputs = Vec::with_capacity(input_gates.len() * self.packed_limbs);
         for g in input_gates {
-            let isolated = self
-                .original_circuit
-                .isolate_coeffs(g, k, lt_isolate_id, ring_dim);
+            let isolated = LtIsolateGadget::isolate_coeffs(&mut self.original_circuit, g, k, lt_isolate_id, ring_dim);
             decomposed_outputs.extend(isolated);
         }
         self.original_circuit.output(decomposed_outputs);
@@ -34,9 +32,9 @@ impl<P: Poly> ArithmeticCircuit<P> {
         ring_dim: usize, // params.ring_dimension() as usize
     ) -> PolyCircuit<P> {
         let mut sc = PolyCircuit::<P>::new();
-        let lt_isolate_id = sc.register_general_lt_isolate_lookup(params, k);
+        let lt_isolate_id = LtIsolateGadget::register_general_lt_isolate_lookup(&mut sc, params, k);
         let a_poly = sc.input(1)[0];
-        let isolated = sc.isolate_coeffs(a_poly, k, lt_isolate_id, ring_dim);
+        let isolated = LtIsolateGadget::isolate_coeffs(&mut sc, a_poly, k, lt_isolate_id, ring_dim);
         sc.output(isolated);
         sc
     }
