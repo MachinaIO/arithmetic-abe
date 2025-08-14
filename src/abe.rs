@@ -53,12 +53,6 @@ impl<
         packed_limbs: usize,
     ) -> (MasterPK<M>, MasterSK<M, ST>) {
         let seed: [u8; 32] = rand::random();
-        let num_packed_poly_inputs =
-            (num_inputs * self.num_crt_limbs * self.crt_depth) / packed_limbs;
-        let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(seed, self.d);
-        let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
-        // todo: we don't need `pubkeys` in here, do we need to sample on here?
-        let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
         let (b_epsilon_trapdoor, b_epsilon) = self.trapdoor_sampler.trapdoor(&params, self.d);
         let u = self
             .uniform_sampler
