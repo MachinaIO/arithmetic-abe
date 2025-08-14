@@ -1,5 +1,6 @@
 use mxx::{matrix::PolyMatrix, sampler::PolyTrapdoorSampler};
 
+#[derive(Clone)]
 pub struct MasterPK<M: PolyMatrix> {
     pub num_inputs: usize,
     pub packed_limbs: usize,
@@ -20,6 +21,7 @@ impl<M: PolyMatrix> MasterPK<M> {
     }
 }
 
+#[derive(Clone)]
 pub struct MasterSK<M: PolyMatrix, ST: PolyTrapdoorSampler<M = M>> {
     pub b_epsilon_trapdoor: ST::Trapdoor,
 }

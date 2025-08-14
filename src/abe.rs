@@ -9,7 +9,7 @@ use mxx::{
     sampler::{DistType, PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler},
 };
 use std::path::PathBuf;
-use std::{marker::PhantomData, sync::Arc};
+use std::sync::Arc;
 
 use crate::{
     ciphertext::Ciphertext,
@@ -21,30 +21,29 @@ use crate::{
 const TAG_BGG_PUBKEY: &[u8] = b"BGG_PUBKEY";
 
 pub struct KeyPolicyABE<
-    M: PolyMatrix,
-    SH: PolyHashSampler<[u8; 32], M = M>,
-    ST: PolyTrapdoorSampler<M = M>,
-    SU: PolyUniformSampler<M = M>,
+    M: PolyMatrix + 'static,
+    SH: PolyHashSampler<[u8; 32], M = M> + Send + Sync,
+    ST: PolyTrapdoorSampler<M = M> + Clone + Send + Sync,
+    SU: PolyUniformSampler<M = M> + Send + Sync,
 > {
-    limb_bit_size: usize,
-    num_crt_limbs: usize,
-    crt_depth: usize,
-    packed_limb: usize,
-    d: usize,
-    hash_sampler: SH,
-    trapdoor_sampler: ST,
-    uniform_sampler: SU,
-    _i: PhantomData<M>,
+    pub limb_bit_size: usize,
+    pub num_crt_limbs: usize,
+    pub crt_depth: usize,
+    pub packed_limb: usize,
+    pub d: usize,
+    pub hash_sampler: SH,
+    pub trapdoor_sampler: ST,
+    pub uniform_sampler: SU,
 }
 
 impl<
     M: PolyMatrix + 'static,
     SH: PolyHashSampler<[u8; 32], M = M> + Send + Sync,
-    ST: PolyTrapdoorSampler<M = M> + Copy + Clone + Send + Sync,
-    SU: PolyUniformSampler<M = M> + Copy + Send + Sync,
+    ST: PolyTrapdoorSampler<M = M> + Clone + Send + Sync,
+    SU: PolyUniformSampler<M = M> + Send + Sync,
 > KeyPolicyABE<M, SH, ST, SU>
 {
-    fn setup(
+    pub fn setup(
         &self,
         params: <M::P as Poly>::Params,
         num_inputs: usize,
@@ -60,7 +59,7 @@ impl<
         (mpk, msk)
     }
 
-    fn enc(
+    pub fn enc(
         &self,
         params: <M::P as Poly>::Params,
         mpk: MasterPK<M>,
@@ -69,14 +68,14 @@ impl<
         p_sigma: f64,
     ) -> Ciphertext<M> {
         let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
-        let num_packed_poly_inputs = total_limbs / mpk.packed_limbs;
+        let num_packed_poly_inputs = total_limbs.div_ceil(mpk.packed_limbs);
         let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
-        let s = self
+        let s = &self
             .uniform_sampler
             .sample_uniform(&params, self.d, 1, DistType::BitDist);
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
         let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
-        let (moduli, crt_bits, _) = params.to_crt();
+        let (moduli, _, _) = params.to_crt();
         debug_assert_eq!(moduli.len(), self.crt_depth);
         // 4. For every `i in 0..num_packed_poly_inputs`, decompose `inputs[i]`
         // into the CRT representation + the big integer representation,
@@ -97,26 +96,30 @@ impl<
             );
             crt_inputs.push(crt_poly);
         }
+        // let mut outputs = crt_sum.finalize_crt(&mut circuit);
+        // circuit.output(outputs);
         // todo: 5. For every `i in 0..num_packed_poly_inputs`, make a packed polynomial `packed_inputs[i]` from the `packed_limbs` integers in `crt_inputs`.
         // todo: so not sure how i can connect from `CrtPoly` to packed inputs
         // bcs current Crt implementation is around defined on top of PolyCircuit, but later we need to use packed_inputs for BggEncoding
         // So not sure how to connect two step.
         let mut packed_inputs: Vec<M::P> = Vec::with_capacity(num_packed_poly_inputs);
-
-        let s_bar = self
-            .uniform_sampler
-            .sample_uniform(&params, 1, self.d, DistType::BitDist);
         // todo: gauss_sigma and p_sigma
-        let bgg_sampler =
-            BGGEncodingSampler::new(&params, &s_bar.get_row(0), self.uniform_sampler, p_sigma);
-        let bgg_encodings = bgg_sampler.sample(&params, &pubkeys, &packed_inputs);
-        let c_b_epsilon_error = self.uniform_sampler.sample_uniform(
+        let e_cu = &self.uniform_sampler.sample_uniform(
+            &params,
+            1,
+            1,
+            DistType::GaussDist { sigma: p_sigma },
+        );
+        let c_b_epsilon_error = &self.uniform_sampler.sample_uniform(
             &params,
             1,
             self.d * (2 + params.modulus_digits()),
             DistType::GaussDist { sigma: p_sigma },
         );
-        let c_b_epsilon = s_bar.clone() * mpk.b_epsilon + c_b_epsilon_error;
+        let bgg_sampler = BGGEncodingSampler::new(&params, &s.get_row(0), SU::new(), p_sigma);
+        let bgg_encodings = bgg_sampler.sample(&params, &pubkeys, &packed_inputs);
+
+        let c_b_epsilon = s.clone() * mpk.b_epsilon + c_b_epsilon_error;
         let boolean_msg = if message {
             <M::P as Poly>::Elem::one(&params.modulus())
         } else {
@@ -126,7 +129,9 @@ impl<
             &params,
             &(<M::P as Poly>::Elem::half_q(&params.modulus()) * boolean_msg),
         );
-        let c_u = (s_bar * mpk.u).get_row(0)[0].clone() + scale;
+
+        let c_u =
+            (s.clone() * mpk.u.clone()).get_row(0)[0].clone() + e_cu.get_row(0)[0].clone() + scale;
 
         Ciphertext {
             bgg_encodings,
@@ -135,7 +140,7 @@ impl<
         }
     }
 
-    fn keygen(
+    pub fn keygen(
         &self,
         params: <M::P as Poly>::Params,
         mpk: MasterPK<M>,
@@ -151,7 +156,7 @@ impl<
         let poly_circuit = arith_circuit.original_circuit.clone();
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
         let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
-        let num_packed_poly_inputs = total_limbs / mpk.packed_limbs;
+        let num_packed_poly_inputs = total_limbs.div_ceil(mpk.packed_limbs);
         let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
         let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
         let b_epsilon_trapdoor = Arc::new(msk.b_epsilon_trapdoor);
@@ -159,7 +164,7 @@ impl<
         let dir_path: PathBuf = "keygen".into();
         let bgg_plt_evaluator = SimpleBggPubKeyEvaluator::<M, SH, SU, ST>::new(
             mpk.seed,
-            self.trapdoor_sampler,
+            self.trapdoor_sampler.clone(),
             b_epsilon.clone(),
             b_epsilon_trapdoor.clone(),
             dir_path.clone(),
@@ -184,7 +189,7 @@ impl<
         }
     }
 
-    fn dec(
+    pub fn dec(
         &self,
         params: <M::P as Poly>::Params,
         ct: Ciphertext<M>,
@@ -203,7 +208,7 @@ impl<
         // 3. Reconstruct `A_{1}, A_{x_{0}}, \dots, A_{x_{num_packed_poly_inputs-1}}` from `seed` with the hash sampler.
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
         let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
-        let num_packed_poly_inputs = total_limbs / mpk.packed_limbs;
+        let num_packed_poly_inputs = total_limbs.div_ceil(mpk.packed_limbs);
         let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
         let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
         // TODO: General question on this step about from this, step 3 we get "bgg public key", and so it refer step 4 is evaluating over public keys. and then suddenly step 5 is refering I can get BGG+ encoding from output wire of circuit which is conflicting from my understandation. Did i missed smth?

@@ -1,12 +1,13 @@
 use mxx::{circuit::PolyCircuit, poly::Poly};
 
+#[derive(Clone)]
 pub struct ArithmeticCircuit<P: Poly> {
-    limb_bit_size: usize,
-    crt_bits: usize,
-    crt_depth: usize,
-    num_crt_limbs: usize,
+    pub limb_bit_size: usize,
+    pub crt_bits: usize,
+    pub crt_depth: usize,
+    pub num_crt_limbs: usize,
     pub packed_limbs: usize,
-    num_inputs: usize,
+    pub num_inputs: usize,
     pub original_circuit: PolyCircuit<P>,
 }
 
