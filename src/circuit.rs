@@ -11,7 +11,7 @@ pub struct ArithmeticCircuit<P: Poly> {
 }
 
 impl<P: Poly> ArithmeticCircuit<P> {
-    pub fn to_poly_circuit(mut self, lt_isolate_id: usize, ring_dim: usize) -> PolyCircuit<P> {
+    pub fn to_poly_circuit(&mut self, lt_isolate_id: usize, ring_dim: usize) {
         let k = self.packed_limbs.saturating_sub(1);
         let input_gates = self.original_circuit.input(self.num_inputs);
 
@@ -23,7 +23,6 @@ impl<P: Poly> ArithmeticCircuit<P> {
             decomposed_outputs.extend(isolated);
         }
         self.original_circuit.output(decomposed_outputs);
-        self.original_circuit
     }
 
     // If you *need* a subcircuit, re-register the lookup *inside* it.

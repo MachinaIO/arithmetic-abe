@@ -21,7 +21,7 @@ impl<M: PolyMatrix> MasterPK<M> {
 }
 
 pub struct MasterSK<M: PolyMatrix, ST: PolyTrapdoorSampler<M = M>> {
-    b_epsilon_trapdoor: ST::Trapdoor,
+    pub b_epsilon_trapdoor: ST::Trapdoor,
 }
 
 impl<M: PolyMatrix, ST: PolyTrapdoorSampler<M = M>> MasterSK<M, ST> {
