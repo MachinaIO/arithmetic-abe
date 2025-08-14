@@ -1,7 +1,7 @@
 use mxx::circuit::gate::GateId;
 use mxx::element::PolyElem;
 use mxx::lookup::simple_eval::SimpleBggPubKeyEvaluator;
-use mxx::utils::{create_bit_random_poly, log_mem};
+use mxx::utils::log_mem;
 use mxx::{
     bgg::sampler::{BGGEncodingSampler, BGGPublicKeySampler},
     circuit::PolyCircuit,
@@ -65,7 +65,7 @@ impl<
         &self,
         params: <M::P as Poly>::Params,
         mpk: MasterPK<M>,
-        inputs: &[<M::P as Poly>::Elem],
+        inputs: &[u64],
         message: bool,
         p_sigma: f64,
     ) -> Ciphertext<M> {
@@ -84,14 +84,14 @@ impl<
         log_mem("finish pubkeys");
         let mut outputs: Vec<GateId> = Vec::with_capacity(mpk.num_inputs);
         let mut circuit = PolyCircuit::<M::P>::new();
-        let inputs = circuit.input(total_limbs);
+        let inputs_gates = circuit.input(total_limbs);
         let ctx = Arc::new(CrtContext::setup(&mut circuit, &params, self.limb_bit_size));
         let num_crt_limbs = self.num_crt_limbs;
         for i in 0..mpk.num_inputs {
             let crt_poly = CrtPoly::from_inputs_interleaved(
                 &mut circuit,
                 ctx.clone(),
-                &inputs,
+                &inputs_gates,
                 num_crt_limbs,
                 i,
                 mpk.num_inputs,
@@ -100,17 +100,14 @@ impl<
         }
         assert_eq!(outputs.len(), total_limbs);
         circuit.output(outputs);
-        // translate given inputs into crt format(which compatible with Circuit definition)
-        // for i 0..num_packed_poly_inputs {
 
-        // };
-        // todo: 5. For every `i in 0..num_packed_poly_inputs`, make a packed polynomial `packed_inputs[i]` from the `packed_limbs` integers in `crt_inputs`.
-        // todo: so not sure how i can connect from `CrtPoly` to packed inputs
-        // bcs current Crt implementation is around defined on top of PolyCircuit, but later we need to use packed_inputs for BggEncoding
-        // So not sure how to connect two step.
-        let packed_inputs: Vec<M::P> =
-            vec![<M::P as Poly>::const_one(&params); num_packed_poly_inputs];
-
+        let packed_inputs: Vec<M::P> = CrtPoly::<M::P>::generate_input_values_from_single(
+            &params,
+            &ctx,
+            inputs,
+            self.limb_bit_size,
+        );
+        assert_eq!(num_packed_poly_inputs, packed_inputs.len());
         // todo: gauss_sigma and p_sigma
         let e_cu = &self.uniform_sampler.sample_uniform(
             &params,

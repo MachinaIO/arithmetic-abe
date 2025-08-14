@@ -9,8 +9,6 @@ use arithmetic_abe::master_key::MasterPK;
 use arithmetic_abe::{abe::KeyPolicyABE, master_key::MasterSK};
 use clap::{Parser, Subcommand};
 use keccak_asm::Keccak256;
-use mxx::element::PolyElem;
-use mxx::poly::{Poly, PolyParams};
 use mxx::{
     circuit::PolyCircuit,
     matrix::dcrt_poly::DCRTPolyMatrix,
@@ -122,11 +120,19 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
 
     // 3) enc
     assert_eq!(cfg.num_inputs, cfg.input.len());
-    let inputs = make_inputs::<DCRTPoly>(&params, cfg.input);
+    // let inputs = make_inputs::<DCRTPoly>(&params, cfg.input);
     let msg_bit = cfg.message != 0;
     let ct: Ciphertext<DCRTPolyMatrix> = timed_read(
         "enc",
-        || abe.enc(params.clone(), mpk.clone(), &inputs, msg_bit, cfg.p_sigma),
+        || {
+            abe.enc(
+                params.clone(),
+                mpk.clone(),
+                &cfg.input,
+                msg_bit,
+                cfg.p_sigma,
+            )
+        },
         &mut t_enc,
     );
 
@@ -149,9 +155,9 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn make_inputs<P: Poly>(params: &P::Params, inputs: Vec<u64>) -> Vec<<P as Poly>::Elem> {
-    inputs
-        .into_iter()
-        .map(|i| <P as Poly>::Elem::from_int64(i as i64, &params.modulus()))
-        .collect()
-}
+// fn make_inputs<P: Poly>(params: &P::Params, inputs: Vec<u64>) -> Vec<<P as Poly>::Elem> {
+//     inputs
+//         .into_iter()
+//         .map(|i| <P as Poly>::Elem::from_int64(i as i64, &params.modulus()))
+//         .collect()
+// }
