@@ -1,16 +1,12 @@
 use mxx::element::PolyElem;
 use mxx::lookup::simple_eval::SimpleBggPubKeyEvaluator;
 use mxx::{
-    bgg::{
-        encoding::BggEncoding,
-        sampler::{BGGEncodingSampler, BGGPublicKeySampler},
-    },
+    bgg::sampler::{BGGEncodingSampler, BGGPublicKeySampler},
     circuit::PolyCircuit,
     gadgets::crt::{CrtContext, CrtPoly},
     matrix::PolyMatrix,
     poly::{Poly, PolyParams},
     sampler::{DistType, PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler},
-    utils::create_bit_random_poly,
 };
 use std::path::PathBuf;
 use std::{marker::PhantomData, sync::Arc};
@@ -188,7 +184,13 @@ impl<
         }
     }
 
-    fn dec(&self, params: <M::P as Poly>::Params, mpk: MasterPK<M>, mut fsk: FuncSK<M>) -> bool {
+    fn dec(
+        &self,
+        params: <M::P as Poly>::Params,
+        ct: Ciphertext<M>,
+        mpk: MasterPK<M>,
+        mut fsk: FuncSK<M>,
+    ) -> bool {
         // 2. Convert `arith_circuit` into `poly_circuit: PolyCircuit` in the way described above.
         let ring_dim = params.ring_dimension() as usize;
         let k = fsk.arith_circuit.packed_limbs.saturating_sub(1);
@@ -217,13 +219,11 @@ impl<
             &pubkeys[1..],
             None::<SimpleBggPubKeyEvaluator<M, SH, SU, ST>>,
         );
-        // 4. Evaluate `poly_circuit` on the above BGG+ public matrices.
         // 5. Let `c_f := s^T*A_f + e_{c_f}` in $\mathcal{R}_{q}^{1 \times m}$
         // be the BGG+ encoding corresponding to the output wire of `poly_circuit`.
-        // Compute `v := (c_{B_{\epsilon}}, c_f) * u_f = s^{T} * u + e_{c_f} * u_f`.
-        // 6. Compute `z = c_{u} - v = e_{c_{u}} - e_{c_f} * u_f + \frac{q}{2}\mu`.
-        // 7. Output `\mu=1` if the constant term of `z` is larger than the threshold and `\mu=0` otherwise.
-
-        todo!()
+        // TODO: Compute `v := (c_{B_{\epsilon}}, c_f) * u_f = s^{T} * u + e_{c_f} * u_f`. <--- how do i concat Also how do i get c_f esp i'm evaluating over BggPubkey
+        let v = ct.c_b_epsilon.concat_rows(&[&result[0].matrix]) * fsk.u_f;
+        let z = ct.c_u - v.get_row(0)[0].clone();
+        z.extract_bits_with_threshold(&params)[0]
     }
 }
