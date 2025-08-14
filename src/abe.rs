@@ -206,6 +206,7 @@ impl<
         let num_packed_poly_inputs = total_limbs / mpk.packed_limbs;
         let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
         let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
+        // TODO: General question on this step about from this, step 3 we get "bgg public key", and so it refer step 4 is evaluating over public keys. and then suddenly step 5 is refering I can get BGG+ encoding from output wire of circuit which is conflicting from my understandation. Did i missed smth?
         // let bgg_plt_evaluator = SimpleBggPubKeyEvaluator::<M, SH, SU, ST>::new(
         //     mpk.seed,
         //     self.trapdoor_sampler,
