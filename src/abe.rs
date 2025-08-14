@@ -100,9 +100,6 @@ impl<
         }
         assert_eq!(outputs.len(), total_limbs);
         circuit.output(outputs);
-        let packed_inputs: Vec<M::P> =
-            vec![<M::P as Poly>::const_one(&params); num_packed_poly_inputs];
-
         // translate given inputs into crt format(which compatible with Circuit definition)
         // for i 0..num_packed_poly_inputs {
 
@@ -111,6 +108,8 @@ impl<
         // todo: so not sure how i can connect from `CrtPoly` to packed inputs
         // bcs current Crt implementation is around defined on top of PolyCircuit, but later we need to use packed_inputs for BggEncoding
         // So not sure how to connect two step.
+        let packed_inputs: Vec<M::P> =
+            vec![<M::P as Poly>::const_one(&params); num_packed_poly_inputs];
 
         // todo: gauss_sigma and p_sigma
         let e_cu = &self.uniform_sampler.sample_uniform(
@@ -138,7 +137,6 @@ impl<
             &params,
             &(<M::P as Poly>::Elem::half_q(&params.modulus()) * boolean_msg),
         );
-
         let c_u =
             (s.clone() * mpk.u.clone()).get_row(0)[0].clone() + e_cu.get_row(0)[0].clone() + scale;
 
@@ -162,6 +160,7 @@ impl<
             .original_circuit
             .register_general_lt_isolate_lookup(&params, k);
         arith_circuit.to_poly_circuit(lt_isolate_id, ring_dim);
+        log_mem("finish to_poly_circuit");
         let poly_circuit = arith_circuit.original_circuit.clone();
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
         let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
@@ -178,6 +177,9 @@ impl<
             b_epsilon_trapdoor.clone(),
             dir_path.clone(),
         );
+        // todo: error on
+        // assertion `left == right` failed: number of provided inputs must match circuit inputs left: 3 right: 60
+        // basically sampled pubkeys is treating as integer arithmetic circuit input also packed, poly_circuit is still accepting as crt + limb decomposed form.
         let result =
             poly_circuit.eval(&params, &pubkeys[0], &pubkeys[1..], Some(bgg_plt_evaluator));
         assert_eq!(result.len(), 1);
