@@ -106,7 +106,7 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
     let mut t_enc = Duration::ZERO;
     let mut t_dec = Duration::ZERO;
 
-    info!(target: "abe",  "starting repetition");
+    info!(target: "abe",  "starting KeyPolicy ABE");
 
     let arith = base_circuit.clone();
 

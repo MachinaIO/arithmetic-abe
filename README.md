@@ -11,5 +11,5 @@ cargo install --path abe
 
 run 
 ```
-abe run --config {path}
+abe run  --config <CONFIG>
 ```
