@@ -121,7 +121,8 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
     );
 
     // 3) enc
-    let inputs = make_inputs::<DCRTPoly>(&params, cfg.num_inputs);
+    assert_eq!(cfg.num_inputs, cfg.input.len());
+    let inputs = make_inputs::<DCRTPoly>(&params, cfg.input);
     let msg_bit = cfg.message != 0;
     let ct: Ciphertext<DCRTPolyMatrix> = timed_read(
         "enc",
@@ -148,7 +149,9 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn make_inputs<P: Poly>(params: &P::Params, num_inputs: usize) -> Vec<<P as Poly>::Elem> {
-    let z = <P as Poly>::Elem::zero(&params.modulus());
-    vec![z; num_inputs]
+fn make_inputs<P: Poly>(params: &P::Params, inputs: Vec<u64>) -> Vec<<P as Poly>::Elem> {
+    inputs
+        .into_iter()
+        .map(|i| <P as Poly>::Elem::from_int64(i as i64, &params.modulus()))
+        .collect()
 }

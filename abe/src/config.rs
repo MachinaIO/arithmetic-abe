@@ -44,5 +44,5 @@ pub struct Config {
     pub ring_dimension: u32,
     /// bit size of the base for the gadget vector and decomposition
     pub base_bits: u32,
-    pub input: Vec<bool>,
+    pub input: Vec<u64>,
 }

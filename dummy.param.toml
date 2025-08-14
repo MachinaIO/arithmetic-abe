@@ -1,4 +1,4 @@
-num_inputs = 7
+num_inputs = 3
 packed_limbs = 1
 limb_bit_size = 5
 crt_depth = 4
@@ -9,4 +9,4 @@ message = 1
 ring_dimension = 16
 base_bits = 10
 switched_modulus = "1"
-input = [false, true, true]
+input = [1, 3, 5]

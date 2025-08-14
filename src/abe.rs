@@ -100,11 +100,17 @@ impl<
         }
         assert_eq!(outputs.len(), total_limbs);
         circuit.output(outputs);
+        let mut packed_inputs: Vec<M::P> = Vec::with_capacity(num_packed_poly_inputs);
+
+        // translate given inputs into crt format(which compatible with Circuit definition)
+        // for i 0..num_packed_poly_inputs {
+
+        // };
         // todo: 5. For every `i in 0..num_packed_poly_inputs`, make a packed polynomial `packed_inputs[i]` from the `packed_limbs` integers in `crt_inputs`.
         // todo: so not sure how i can connect from `CrtPoly` to packed inputs
         // bcs current Crt implementation is around defined on top of PolyCircuit, but later we need to use packed_inputs for BggEncoding
         // So not sure how to connect two step.
-        let mut packed_inputs: Vec<M::P> = Vec::with_capacity(num_packed_poly_inputs);
+
         // todo: gauss_sigma and p_sigma
         let e_cu = &self.uniform_sampler.sample_uniform(
             &params,
