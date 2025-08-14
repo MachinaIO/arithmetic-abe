@@ -1,7 +1,7 @@
 use mxx::circuit::gate::GateId;
 use mxx::element::PolyElem;
 use mxx::lookup::simple_eval::SimpleBggPubKeyEvaluator;
-use mxx::utils::log_mem;
+use mxx::utils::{create_bit_random_poly, log_mem};
 use mxx::{
     bgg::sampler::{BGGEncodingSampler, BGGPublicKeySampler},
     circuit::PolyCircuit,
@@ -75,7 +75,7 @@ impl<
         let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
         let s = &self
             .uniform_sampler
-            .sample_uniform(&params, self.d, 1, DistType::BitDist);
+            .sample_uniform(&params, 1, self.d, DistType::BitDist);
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
         log_mem("sampled s");
         let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
@@ -100,7 +100,8 @@ impl<
         }
         assert_eq!(outputs.len(), total_limbs);
         circuit.output(outputs);
-        let mut packed_inputs: Vec<M::P> = Vec::with_capacity(num_packed_poly_inputs);
+        let packed_inputs: Vec<M::P> =
+            vec![<M::P as Poly>::const_one(&params); num_packed_poly_inputs];
 
         // translate given inputs into crt format(which compatible with Circuit definition)
         // for i 0..num_packed_poly_inputs {
@@ -126,7 +127,7 @@ impl<
         );
         let bgg_sampler = BGGEncodingSampler::new(&params, &s.get_row(0), SU::new(), p_sigma);
         let bgg_encodings = bgg_sampler.sample(&params, &pubkeys, &packed_inputs);
-
+        log_mem("finish bgg_encodings");
         let c_b_epsilon = s.clone() * mpk.b_epsilon + c_b_epsilon_error;
         let boolean_msg = if message {
             <M::P as Poly>::Elem::one(&params.modulus())
