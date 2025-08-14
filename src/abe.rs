@@ -148,9 +148,15 @@ impl<
         params: <M::P as Poly>::Params,
         mpk: MasterPK<M>,
         msk: MasterSK<M, ST>,
-        circuit: ArithmeticCircuit,
-    ) -> FuncSK {
+        mut circuit: ArithmeticCircuit<M::P>,
+    ) -> FuncSK<M> {
         // 1. Convert `arith_circuit` into `poly_circuit: PolyCircuit` in the way described above.
+        let ring_dim = params.ring_dimension() as usize;
+        let k = circuit.packed_limbs.saturating_sub(1);
+        let lt_isolate_id = circuit
+            .original_circuit
+            .register_general_lt_isolate_lookup(&params, k);
+        let mut poly_circuit = circuit.to_poly_circuit(lt_isolate_id, ring_dim);
         // 2. Reconstruct `A_{1}, A_{x_{0}}, \dots, A_{x_{num_packed_poly_inputs-1}}` from `seed` with the hash sampler.
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
         let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
@@ -167,8 +173,15 @@ impl<
         todo!()
     }
 
-    fn dec(&self, params: <M::P as Poly>::Params, mpk: MasterPK<M>, fsk: FuncSK) -> bool {
+    fn dec(&self, params: <M::P as Poly>::Params, mpk: MasterPK<M>, mut fsk: FuncSK<M>) -> bool {
         // 2. Convert `arith_circuit` into `poly_circuit: PolyCircuit` in the way described above.
+        let ring_dim = params.ring_dimension() as usize;
+        let k = fsk.arith_circuit.packed_limbs.saturating_sub(1);
+        let lt_isolate_id = fsk
+            .arith_circuit
+            .original_circuit
+            .register_general_lt_isolate_lookup(&params, k);
+        let mut poly_circuit = fsk.arith_circuit.to_poly_circuit(lt_isolate_id, ring_dim);
         // 3. Reconstruct `A_{1}, A_{x_{0}}, \dots, A_{x_{num_packed_poly_inputs-1}}` from `seed` with the hash sampler.
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
         let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
