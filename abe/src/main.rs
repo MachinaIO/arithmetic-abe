@@ -120,13 +120,6 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
         &mut t_setup,
     );
 
-    // 2) keygen
-    let fsk: FuncSK<DCRTPolyMatrix> = timed_read(
-        "keygen",
-        || abe.keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone()),
-        &mut t_keygen,
-    );
-
     // 3) enc
     let inputs = make_inputs::<DCRTPoly>(&params, cfg.num_inputs);
     let msg_bit = cfg.message != 0;
@@ -134,6 +127,13 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
         "enc",
         || abe.enc(params.clone(), mpk.clone(), &inputs, msg_bit, cfg.p_sigma),
         &mut t_enc,
+    );
+
+    // 2) keygen
+    let fsk: FuncSK<DCRTPolyMatrix> = timed_read(
+        "keygen",
+        || abe.keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone()),
+        &mut t_keygen,
     );
 
     // 4) dec

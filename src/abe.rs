@@ -1,5 +1,6 @@
 use mxx::element::PolyElem;
 use mxx::lookup::simple_eval::SimpleBggPubKeyEvaluator;
+use mxx::utils::log_mem;
 use mxx::{
     bgg::sampler::{BGGEncodingSampler, BGGPublicKeySampler},
     circuit::PolyCircuit,
@@ -69,33 +70,34 @@ impl<
     ) -> Ciphertext<M> {
         let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
         let num_packed_poly_inputs = total_limbs.div_ceil(mpk.packed_limbs);
+        log_mem(format!("total_limbs {}", total_limbs));
         let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
         let s = &self
             .uniform_sampler
             .sample_uniform(&params, self.d, 1, DistType::BitDist);
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
+        log_mem("sampled s");
         let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
         let (moduli, _, _) = params.to_crt();
-        debug_assert_eq!(moduli.len(), self.crt_depth);
-        // 4. For every `i in 0..num_packed_poly_inputs`, decompose `inputs[i]`
-        // into the CRT representation + the big integer representation,
-        // stored in `crt_inputs[i*(num_crt_limbs*crt_depth)..(i+1)*(num_crt_limbs*crt_depth)]`.
+        assert_eq!(moduli.len(), self.crt_depth);
+        log_mem("finish pubkeys");
         let mut crt_inputs: Vec<CrtPoly<M::P>> = Vec::with_capacity(num_packed_poly_inputs);
         let mut circuit = PolyCircuit::<M::P>::new();
         let inputs = circuit.input(total_limbs);
         let ctx = Arc::new(CrtContext::setup(&mut circuit, &params, self.limb_bit_size));
-        for i in 0..num_packed_poly_inputs {
-            // let target_input = inputs[i].value();
+        let num_crt_limbs = self.num_crt_limbs;
+        for i in 0..mpk.num_inputs {
             let crt_poly = CrtPoly::from_inputs_interleaved(
                 &mut circuit,
                 ctx.clone(),
                 &inputs,
-                self.num_crt_limbs,
+                num_crt_limbs,
                 i,
-                num_packed_poly_inputs,
+                mpk.num_inputs,
             );
             crt_inputs.push(crt_poly);
         }
+        log_mem("finish loop");
         // let mut outputs = crt_sum.finalize_crt(&mut circuit);
         // circuit.output(outputs);
         // todo: 5. For every `i in 0..num_packed_poly_inputs`, make a packed polynomial `packed_inputs[i]` from the `packed_limbs` integers in `crt_inputs`.
@@ -196,7 +198,6 @@ impl<
         mpk: MasterPK<M>,
         mut fsk: FuncSK<M>,
     ) -> bool {
-        // 2. Convert `arith_circuit` into `poly_circuit: PolyCircuit` in the way described above.
         let ring_dim = params.ring_dimension() as usize;
         let k = fsk.arith_circuit.packed_limbs.saturating_sub(1);
         let lt_isolate_id = fsk
@@ -205,7 +206,6 @@ impl<
             .register_general_lt_isolate_lookup(&params, k);
         fsk.arith_circuit.to_poly_circuit(lt_isolate_id, ring_dim);
         let poly_circuit = fsk.arith_circuit.original_circuit.clone();
-        // 3. Reconstruct `A_{1}, A_{x_{0}}, \dots, A_{x_{num_packed_poly_inputs-1}}` from `seed` with the hash sampler.
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
         let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
         let num_packed_poly_inputs = total_limbs.div_ceil(mpk.packed_limbs);

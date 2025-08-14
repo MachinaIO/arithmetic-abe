@@ -1,5 +1,5 @@
-num_inputs = 1
-packed_limbs = 4
+num_inputs = 7
+packed_limbs = 1
 limb_bit_size = 5
 crt_depth = 4
 crt_bits = 21
