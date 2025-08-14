@@ -1,3 +1,4 @@
+use mxx::circuit::gate::GateId;
 use mxx::element::PolyElem;
 use mxx::lookup::simple_eval::SimpleBggPubKeyEvaluator;
 use mxx::utils::log_mem;
@@ -81,7 +82,7 @@ impl<
         let (moduli, _, _) = params.to_crt();
         assert_eq!(moduli.len(), self.crt_depth);
         log_mem("finish pubkeys");
-        let mut crt_inputs: Vec<CrtPoly<M::P>> = Vec::with_capacity(num_packed_poly_inputs);
+        let mut outputs: Vec<GateId> = Vec::with_capacity(mpk.num_inputs);
         let mut circuit = PolyCircuit::<M::P>::new();
         let inputs = circuit.input(total_limbs);
         let ctx = Arc::new(CrtContext::setup(&mut circuit, &params, self.limb_bit_size));
@@ -95,11 +96,10 @@ impl<
                 i,
                 mpk.num_inputs,
             );
-            crt_inputs.push(crt_poly);
+            outputs.extend(crt_poly.limb());
         }
-        log_mem("finish loop");
-        // let mut outputs = crt_sum.finalize_crt(&mut circuit);
-        // circuit.output(outputs);
+        assert_eq!(outputs.len(), total_limbs);
+        circuit.output(outputs);
         // todo: 5. For every `i in 0..num_packed_poly_inputs`, make a packed polynomial `packed_inputs[i]` from the `packed_limbs` integers in `crt_inputs`.
         // todo: so not sure how i can connect from `CrtPoly` to packed inputs
         // bcs current Crt implementation is around defined on top of PolyCircuit, but later we need to use packed_inputs for BggEncoding
