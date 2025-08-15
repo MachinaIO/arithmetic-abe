@@ -1,6 +1,6 @@
 use mxx::circuit::gate::GateId;
 use mxx::element::PolyElem;
-use mxx::lookup::simple_eval::SimpleBggPubKeyEvaluator;
+use mxx::lookup::simple_eval::{SimpleBggEncodingPltEvaluator, SimpleBggPubKeyEvaluator};
 use mxx::utils::log_mem;
 use mxx::{
     bgg::sampler::{BGGEncodingSampler, BGGPublicKeySampler},
@@ -82,24 +82,24 @@ impl<
         let (moduli, _, _) = params.to_crt();
         assert_eq!(moduli.len(), self.crt_depth);
         log_mem("finish pubkeys");
-        let mut outputs: Vec<GateId> = Vec::with_capacity(mpk.num_inputs);
+        // let mut outputs: Vec<GateId> = Vec::with_capacity(mpk.num_inputs);
         let mut circuit = PolyCircuit::<M::P>::new();
-        let inputs_gates = circuit.input(total_limbs);
+        // let inputs_gates = circuit.input(total_limbs);
         let ctx = Arc::new(CrtContext::setup(&mut circuit, &params, self.limb_bit_size));
-        let num_crt_limbs = self.num_crt_limbs;
-        for i in 0..mpk.num_inputs {
-            let crt_poly = CrtPoly::from_inputs_interleaved(
-                &mut circuit,
-                ctx.clone(),
-                &inputs_gates,
-                num_crt_limbs,
-                i,
-                mpk.num_inputs,
-            );
-            outputs.extend(crt_poly.limb());
-        }
-        assert_eq!(outputs.len(), total_limbs);
-        circuit.output(outputs);
+        // let num_crt_limbs = self.num_crt_limbs;
+        // for i in 0..mpk.num_inputs {
+        //     let crt_poly = CrtPoly::from_inputs_interleaved(
+        //         &mut circuit,
+        //         ctx.clone(),
+        //         &inputs_gates,
+        //         num_crt_limbs,
+        //         i,
+        //         mpk.num_inputs,
+        //     );
+        //     outputs.extend(crt_poly.limb());
+        // }
+        // assert_eq!(outputs.len(), total_limbs);
+        // circuit.output(outputs);
 
         let packed_inputs: Vec<M::P> = CrtPoly::<M::P>::generate_input_values_from_single(
             &params,
@@ -212,29 +212,20 @@ impl<
             .register_general_lt_isolate_lookup(&params, k);
         fsk.arith_circuit.to_poly_circuit(lt_isolate_id, ring_dim);
         let poly_circuit = fsk.arith_circuit.original_circuit.clone();
-        let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
-        let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
-        let num_packed_poly_inputs = total_limbs.div_ceil(mpk.packed_limbs);
-        let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
-        let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
-        // TODO: General question on this step about from this, step 3 we get "bgg public key", and so it refer step 4 is evaluating over public keys. and then suddenly step 5 is refering I can get BGG+ encoding from output wire of circuit which is conflicting from my understandation. Did i missed smth?
-        // let bgg_plt_evaluator = SimpleBggPubKeyEvaluator::<M, SH, SU, ST>::new(
-        //     mpk.seed,
-        //     self.trapdoor_sampler,
-        //     Arc::new(mpk.b_epsilon),
-        //     Arc::new(msk.b_epsilon_trapdoor),
-        //     "keygen".into(),
-        // );
+        let encodings = &ct.bgg_encodings[..];
+        // TODO: provide dir_path as an argument.
+        let dir_path: PathBuf = "keygen".into();
+        let bgg_plt_evaluator =
+            SimpleBggEncodingPltEvaluator::<M, SH>::new(mpk.seed, dir_path, ct.c_b_epsilon.clone());
         let result = poly_circuit.eval(
             &params,
-            &pubkeys[0],
-            &pubkeys[1..],
-            None::<SimpleBggPubKeyEvaluator<M, SH, SU, ST>>,
+            &encodings[0],
+            &encodings[1..],
+            Some(bgg_plt_evaluator),
         );
         // 5. Let `c_f := s^T*A_f + e_{c_f}` in $\mathcal{R}_{q}^{1 \times m}$
         // be the BGG+ encoding corresponding to the output wire of `poly_circuit`.
-        // TODO: Compute `v := (c_{B_{\epsilon}}, c_f) * u_f = s^{T} * u + e_{c_f} * u_f`. <--- how do i concat Also how do i get c_f esp i'm evaluating over BggPubkey
-        let v = ct.c_b_epsilon.concat_rows(&[&result[0].matrix]) * fsk.u_f;
+        let v = ct.c_b_epsilon.concat_rows(&[&result[0].vector]) * fsk.u_f;
         let z = ct.c_u - v.get_row(0)[0].clone();
         z.extract_bits_with_threshold(&params)[0]
     }
