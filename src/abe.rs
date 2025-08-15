@@ -4,7 +4,6 @@ use crate::{
     keys::FuncSK,
     keys::{MasterPK, MasterSK},
 };
-use mxx::circuit::gate::GateId;
 use mxx::element::PolyElem;
 use mxx::lookup::simple_eval::SimpleBggPubKeyEvaluator;
 use mxx::utils::log_mem;
@@ -19,6 +18,7 @@ use mxx::{
     poly::{Poly, PolyParams},
     sampler::{DistType, PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler},
 };
+use mxx::{circuit::gate::GateId, lookup::simple_eval::SimpleBggEncodingPltEvaluator};
 use num_bigint::BigUint;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -207,29 +207,19 @@ impl<
         );
         arith_circuit.to_poly_circuit(lt_isolate_id, ring_dim);
         let poly_circuit = arith_circuit.original_circuit.clone();
-        let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
-        let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
-        let num_packed_poly_inputs = total_limbs.div_ceil(mpk.packed_limbs);
-        let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
-        let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
-        // TODO: General question on this step about from this, step 3 we get "bgg public key", and so it refer step 4 is evaluating over public keys. and then suddenly step 5 is refering I can get BGG+ encoding from output wire of circuit which is conflicting from my understandation. Did i missed smth?
-        // let bgg_plt_evaluator = SimpleBggPubKeyEvaluator::<M, SH, SU, ST>::new(
-        //     mpk.seed,
-        //     self.trapdoor_sampler,
-        //     Arc::new(mpk.b_epsilon),
-        //     Arc::new(msk.b_epsilon_trapdoor),
-        //     "keygen".into(),
-        // );
+        let encodings = &ct.bgg_encodings[..];
+        let dir_path: PathBuf = fsk.dir_path;
+        let bgg_plt_evaluator =
+            SimpleBggEncodingPltEvaluator::<M, SH>::new(mpk.seed, dir_path, ct.c_b_epsilon.clone());
         let result = poly_circuit.eval(
             &params,
-            &pubkeys[0],
-            &pubkeys[1..],
-            None::<SimpleBggPubKeyEvaluator<M, SH, SU, ST>>,
+            &encodings[0],
+            &encodings[1..],
+            Some(bgg_plt_evaluator),
         );
         // 5. Let `c_f := s^T*A_f + e_{c_f}` in $\mathcal{R}_{q}^{1 \times m}$
         // be the BGG+ encoding corresponding to the output wire of `poly_circuit`.
-        // TODO: Compute `v := (c_{B_{\epsilon}}, c_f) * u_f = s^{T} * u + e_{c_f} * u_f`. <--- how do i concat Also how do i get c_f esp i'm evaluating over BggPubkey
-        let v = ct.c_b_epsilon.concat_rows(&[&result[0].matrix]) * fsk.u_f;
+        let v = ct.c_b_epsilon.concat_rows(&[&result[0].vector]) * fsk.u_f;
         let z = ct.c_u - v.get_row(0)[0].clone();
         z.extract_bits_with_threshold(&params)[0]
     }
