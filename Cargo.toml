@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["abe", "."]
+
+
+[package]
+name = "arithmetic-abe"
+version = "0.1.0"
+edition = "2024"
+
+
+[dependencies]
+mxx = { git = "https://github.com/MachinaIO/mxx.git", branch = "simplified-crt" }
+rand = { version = "0.9.0", features = ["std_rng"] }
+num-bigint = { version = "0.4", features = ["serde"] }
