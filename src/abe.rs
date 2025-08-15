@@ -1,24 +1,27 @@
-use mxx::circuit::gate::GateId;
+use crate::{
+    ciphertext::Ciphertext,
+    circuit::ArithmeticCircuit,
+    keys::FuncSK,
+    keys::{MasterPK, MasterSK},
+};
 use mxx::element::PolyElem;
-use mxx::lookup::simple_eval::{SimpleBggEncodingPltEvaluator, SimpleBggPubKeyEvaluator};
+use mxx::lookup::simple_eval::SimpleBggPubKeyEvaluator;
 use mxx::utils::log_mem;
 use mxx::{
     bgg::sampler::{BGGEncodingSampler, BGGPublicKeySampler},
     circuit::PolyCircuit,
-    gadgets::crt::{CrtContext, CrtPoly},
+    gadgets::{
+        crt::{CrtContext, CrtPoly},
+        lt_isolate::LtIsolateGadget,
+    },
     matrix::PolyMatrix,
     poly::{Poly, PolyParams},
     sampler::{DistType, PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler},
 };
+use mxx::{circuit::gate::GateId, lookup::simple_eval::SimpleBggEncodingPltEvaluator};
+use num_bigint::BigUint;
 use std::path::PathBuf;
 use std::sync::Arc;
-
-use crate::{
-    ciphertext::Ciphertext,
-    circuit::ArithmeticCircuit,
-    functional_key::FuncSK,
-    master_key::{MasterPK, MasterSK},
-};
 
 const TAG_BGG_PUBKEY: &[u8] = b"BGG_PUBKEY";
 
@@ -28,6 +31,7 @@ pub struct KeyPolicyABE<
     ST: PolyTrapdoorSampler<M = M> + Clone + Send + Sync,
     SU: PolyUniformSampler<M = M> + Send + Sync,
 > {
+    pub p_sigma: f64,
     pub limb_bit_size: usize,
     pub num_crt_limbs: usize,
     pub crt_depth: usize,
@@ -65,42 +69,37 @@ impl<
         &self,
         params: <M::P as Poly>::Params,
         mpk: MasterPK<M>,
-        inputs: &[u64],
+        inputs: &[BigUint],
         message: bool,
-        p_sigma: f64,
     ) -> Ciphertext<M> {
         let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
         let num_packed_poly_inputs = total_limbs.div_ceil(mpk.packed_limbs);
-        log_mem(format!("total_limbs {}", total_limbs));
         let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
         let s = &self
             .uniform_sampler
             .sample_uniform(&params, 1, self.d, DistType::BitDist);
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
-        log_mem("sampled s");
         let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
-        let (moduli, _, _) = params.to_crt();
-        assert_eq!(moduli.len(), self.crt_depth);
-        log_mem("finish pubkeys");
-        // let mut outputs: Vec<GateId> = Vec::with_capacity(mpk.num_inputs);
-        let mut circuit = PolyCircuit::<M::P>::new();
-        // let inputs_gates = circuit.input(total_limbs);
-        let ctx = Arc::new(CrtContext::setup(&mut circuit, &params, self.limb_bit_size));
-        // let num_crt_limbs = self.num_crt_limbs;
-        // for i in 0..mpk.num_inputs {
-        //     let crt_poly = CrtPoly::from_inputs_interleaved(
-        //         &mut circuit,
-        //         ctx.clone(),
-        //         &inputs_gates,
-        //         num_crt_limbs,
-        //         i,
-        //         mpk.num_inputs,
-        //     );
-        //     outputs.extend(crt_poly.limb());
-        // }
-        // assert_eq!(outputs.len(), total_limbs);
-        // circuit.output(outputs);
 
+        // ===== CRT =====
+        let mut outputs: Vec<GateId> = Vec::with_capacity(mpk.num_inputs);
+        let mut circuit = PolyCircuit::<M::P>::new();
+        let inputs_gates = circuit.input(total_limbs);
+        let ctx = Arc::new(CrtContext::setup(&mut circuit, &params, self.limb_bit_size));
+        let num_crt_limbs = self.num_crt_limbs;
+        for i in 0..mpk.num_inputs {
+            let crt_poly = CrtPoly::from_inputs_interleaved(
+                &mut circuit,
+                ctx.clone(),
+                &inputs_gates,
+                num_crt_limbs,
+                i,
+                mpk.num_inputs,
+            );
+            outputs.extend(crt_poly.limb());
+        }
+        assert_eq!(outputs.len(), total_limbs);
+        circuit.output(outputs);
         let packed_inputs: Vec<M::P> = CrtPoly::<M::P>::generate_input_values_from_single(
             &params,
             &ctx,
@@ -108,34 +107,31 @@ impl<
             self.limb_bit_size,
         );
         assert_eq!(num_packed_poly_inputs, packed_inputs.len());
-        // todo: gauss_sigma and p_sigma
-        let e_cu = &self.uniform_sampler.sample_uniform(
+
+        // ===== Enc =====
+        let e_cu = &self.uniform_sampler.sample_poly(
             &params,
-            1,
-            1,
-            DistType::GaussDist { sigma: p_sigma },
+            &DistType::GaussDist {
+                sigma: self.p_sigma,
+            },
         );
         let c_b_epsilon_error = &self.uniform_sampler.sample_uniform(
             &params,
             1,
             self.d * (2 + params.modulus_digits()),
-            DistType::GaussDist { sigma: p_sigma },
+            DistType::GaussDist {
+                sigma: self.p_sigma,
+            },
         );
-        let bgg_sampler = BGGEncodingSampler::new(&params, &s.get_row(0), SU::new(), p_sigma);
+        let bgg_sampler = BGGEncodingSampler::new(&params, &s.get_row(0), SU::new(), self.p_sigma);
         let bgg_encodings = bgg_sampler.sample(&params, &pubkeys, &packed_inputs);
-        log_mem("finish bgg_encodings");
         let c_b_epsilon = s.clone() * mpk.b_epsilon + c_b_epsilon_error;
-        let boolean_msg = if message {
-            <M::P as Poly>::Elem::one(&params.modulus())
-        } else {
-            <M::P as Poly>::Elem::zero(&params.modulus())
-        };
         let scale = M::P::from_elem_to_constant(
             &params,
-            &(<M::P as Poly>::Elem::half_q(&params.modulus()) * boolean_msg),
+            &(<M::P as Poly>::Elem::half_q(&params.modulus())
+                * <M::P as Poly>::Elem::new(message, params.modulus())),
         );
-        let c_u =
-            (s.clone() * mpk.u.clone()).get_row(0)[0].clone() + e_cu.get_row(0)[0].clone() + scale;
+        let c_u = (s.clone() * mpk.u.clone()).get_row(0)[0].clone() + e_cu + scale;
 
         Ciphertext {
             bgg_encodings,
@@ -153,9 +149,11 @@ impl<
     ) -> FuncSK<M> {
         let ring_dim = params.ring_dimension() as usize;
         let k = arith_circuit.packed_limbs.saturating_sub(1);
-        let lt_isolate_id = arith_circuit
-            .original_circuit
-            .register_general_lt_isolate_lookup(&params, k);
+        let lt_isolate_id = LtIsolateGadget::register_general_lt_isolate_lookup(
+            &mut arith_circuit.original_circuit,
+            &params,
+            k,
+        );
         arith_circuit.to_poly_circuit(lt_isolate_id, ring_dim);
         log_mem("finish to_poly_circuit");
         let poly_circuit = arith_circuit.original_circuit.clone();
@@ -189,12 +187,7 @@ impl<
             &mpk.u,
         );
 
-        FuncSK {
-            arith_circuit,
-            a_f,
-            u_f,
-            dir_path,
-        }
+        FuncSK { a_f, u_f, dir_path }
     }
 
     pub fn dec(
@@ -202,19 +195,20 @@ impl<
         params: <M::P as Poly>::Params,
         ct: Ciphertext<M>,
         mpk: MasterPK<M>,
-        mut fsk: FuncSK<M>,
+        fsk: FuncSK<M>,
+        mut arith_circuit: ArithmeticCircuit<M::P>,
     ) -> bool {
         let ring_dim = params.ring_dimension() as usize;
-        let k = fsk.arith_circuit.packed_limbs.saturating_sub(1);
-        let lt_isolate_id = fsk
-            .arith_circuit
-            .original_circuit
-            .register_general_lt_isolate_lookup(&params, k);
-        fsk.arith_circuit.to_poly_circuit(lt_isolate_id, ring_dim);
-        let poly_circuit = fsk.arith_circuit.original_circuit.clone();
+        let k = arith_circuit.packed_limbs.saturating_sub(1);
+        let lt_isolate_id = LtIsolateGadget::register_general_lt_isolate_lookup(
+            &mut arith_circuit.original_circuit,
+            &params,
+            k,
+        );
+        arith_circuit.to_poly_circuit(lt_isolate_id, ring_dim);
+        let poly_circuit = arith_circuit.original_circuit.clone();
         let encodings = &ct.bgg_encodings[..];
-        // TODO: provide dir_path as an argument.
-        let dir_path: PathBuf = "keygen".into();
+        let dir_path: PathBuf = fsk.dir_path;
         let bgg_plt_evaluator =
             SimpleBggEncodingPltEvaluator::<M, SH>::new(mpk.seed, dir_path, ct.c_b_epsilon.clone());
         let result = poly_circuit.eval(

@@ -103,6 +103,7 @@ name = "arithmetic-abe"
 version = "0.1.0"
 dependencies = [
  "mxx",
+ "num-bigint",
  "rand",
 ]
 
@@ -596,7 +597,7 @@ dependencies = [
 [[package]]
 name = "mxx"
 version = "0.1.0"
-source = "git+https://github.com/MachinaIO/mxx.git?branch=simplified-crt#134392c50ff8efb3f7b2302578a260eb6e1ac084"
+source = "git+https://github.com/MachinaIO/mxx.git?branch=simplified-crt#1f40c35fe91be4d4e9c5aa8b54a451c762daa1fd"
 dependencies = [
  "bincode",
  "bitvec",

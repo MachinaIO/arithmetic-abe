@@ -1,12 +1,10 @@
 pub mod config;
 use crate::config::Config;
-
 use anyhow::Result;
+use arithmetic_abe::abe::KeyPolicyABE;
 use arithmetic_abe::ciphertext::Ciphertext;
 use arithmetic_abe::circuit::ArithmeticCircuit;
-use arithmetic_abe::functional_key::FuncSK;
-use arithmetic_abe::master_key::MasterPK;
-use arithmetic_abe::{abe::KeyPolicyABE, master_key::MasterSK};
+use arithmetic_abe::keys::{FuncSK, MasterPK, MasterSK};
 use clap::{Parser, Subcommand};
 use keccak_asm::Keccak256;
 use mxx::{
@@ -82,7 +80,7 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
 
     let uniform_sampler = DCRTPolyUniformSampler::new();
     let hash_sampler = DCRTPolyHashSampler::<Keccak256>::new();
-    let trapdoor_sampler = DCRTPolyTrapdoorSampler::new(&params, cfg.p_sigma);
+    let trapdoor_sampler = DCRTPolyTrapdoorSampler::new(&params, cfg.trapdoor_sigma);
     let abe = KeyPolicyABE::<
         DCRTPolyMatrix,
         DCRTPolyHashSampler<Keccak256>,
@@ -97,6 +95,7 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
         hash_sampler,
         trapdoor_sampler,
         uniform_sampler,
+        p_sigma: cfg.p_sigma,
     };
 
     let mut t_setup = Duration::ZERO;
@@ -124,15 +123,7 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
     let msg_bit = cfg.message != 0;
     let ct: Ciphertext<DCRTPolyMatrix> = timed_read(
         "enc",
-        || {
-            abe.enc(
-                params.clone(),
-                mpk.clone(),
-                &cfg.input,
-                msg_bit,
-                cfg.p_sigma,
-            )
-        },
+        || abe.enc(params.clone(), mpk.clone(), &cfg.input, msg_bit),
         &mut t_enc,
     );
 
@@ -146,7 +137,7 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
     // 4) dec
     let bit: bool = timed_read(
         "dec",
-        || abe.dec(params.clone(), ct, mpk.clone(), fsk.clone()),
+        || abe.dec(params.clone(), ct, mpk.clone(), fsk.clone(), arith.clone()),
         &mut t_dec,
     );
 
@@ -154,10 +145,3 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
 
     Ok(())
 }
-
-// fn make_inputs<P: Poly>(params: &P::Params, inputs: Vec<u64>) -> Vec<<P as Poly>::Elem> {
-//     inputs
-//         .into_iter()
-//         .map(|i| <P as Poly>::Elem::from_int64(i as i64, &params.modulus()))
-//         .collect()
-// }
