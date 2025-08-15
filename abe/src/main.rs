@@ -1,11 +1,10 @@
 pub mod config;
 use crate::config::Config;
 use anyhow::Result;
+use arithmetic_abe::abe::KeyPolicyABE;
 use arithmetic_abe::ciphertext::Ciphertext;
 use arithmetic_abe::circuit::ArithmeticCircuit;
-use arithmetic_abe::functional_key::FuncSK;
-use arithmetic_abe::master_key::MasterPK;
-use arithmetic_abe::{abe::KeyPolicyABE, master_key::MasterSK};
+use arithmetic_abe::keys::{FuncSK, MasterPK, MasterSK};
 use clap::{Parser, Subcommand};
 use keccak_asm::Keccak256;
 use mxx::{
@@ -146,10 +145,3 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
 
     Ok(())
 }
-
-// fn make_inputs<P: Poly>(params: &P::Params, inputs: Vec<u64>) -> Vec<<P as Poly>::Elem> {
-//     inputs
-//         .into_iter()
-//         .map(|i| <P as Poly>::Elem::from_int64(i as i64, &params.modulus()))
-//         .collect()
-// }

@@ -1,4 +1,13 @@
-use mxx::{matrix::PolyMatrix, sampler::PolyTrapdoorSampler};
+use mxx::matrix::PolyMatrix;
+use mxx::sampler::PolyTrapdoorSampler;
+use std::path::PathBuf;
+
+#[derive(Clone)]
+pub struct FuncSK<M: PolyMatrix> {
+    pub a_f: M,
+    pub u_f: M,
+    pub dir_path: PathBuf,
+}
 
 #[derive(Clone)]
 pub struct MasterPK<M: PolyMatrix> {

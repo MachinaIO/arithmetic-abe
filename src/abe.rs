@@ -1,8 +1,8 @@
 use crate::{
     ciphertext::Ciphertext,
     circuit::ArithmeticCircuit,
-    functional_key::FuncSK,
-    master_key::{MasterPK, MasterSK},
+    keys::FuncSK,
+    keys::{MasterPK, MasterSK},
 };
 use mxx::circuit::gate::GateId;
 use mxx::element::PolyElem;
