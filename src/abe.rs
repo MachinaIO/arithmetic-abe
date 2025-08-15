@@ -80,6 +80,8 @@ impl<
             .sample_uniform(&params, 1, self.d, DistType::BitDist);
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
         let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
+
+        // ===== CRT =====
         let mut outputs: Vec<GateId> = Vec::with_capacity(mpk.num_inputs);
         let mut circuit = PolyCircuit::<M::P>::new();
         let inputs_gates = circuit.input(total_limbs);
@@ -105,11 +107,11 @@ impl<
             self.limb_bit_size,
         );
         assert_eq!(num_packed_poly_inputs, packed_inputs.len());
-        let e_cu = &self.uniform_sampler.sample_uniform(
+
+        // ===== Enc =====
+        let e_cu = &self.uniform_sampler.sample_poly(
             &params,
-            1,
-            1,
-            DistType::GaussDist {
+            &DistType::GaussDist {
                 sigma: self.p_sigma,
             },
         );
@@ -124,17 +126,12 @@ impl<
         let bgg_sampler = BGGEncodingSampler::new(&params, &s.get_row(0), SU::new(), self.p_sigma);
         let bgg_encodings = bgg_sampler.sample(&params, &pubkeys, &packed_inputs);
         let c_b_epsilon = s.clone() * mpk.b_epsilon + c_b_epsilon_error;
-        let boolean_msg = if message {
-            <M::P as Poly>::Elem::one(&params.modulus())
-        } else {
-            <M::P as Poly>::Elem::zero(&params.modulus())
-        };
         let scale = M::P::from_elem_to_constant(
             &params,
-            &(<M::P as Poly>::Elem::half_q(&params.modulus()) * boolean_msg),
+            &(<M::P as Poly>::Elem::half_q(&params.modulus())
+                * <M::P as Poly>::Elem::new(message, params.modulus())),
         );
-        let c_u =
-            (s.clone() * mpk.u.clone()).get_row(0)[0].clone() + e_cu.get_row(0)[0].clone() + scale;
+        let c_u = (s.clone() * mpk.u.clone()).get_row(0)[0].clone() + e_cu + scale;
 
         Ciphertext {
             bgg_encodings,

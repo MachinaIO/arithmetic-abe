@@ -18,18 +18,23 @@ impl<P: Poly> ArithmeticCircuit<P> {
 
         let mut decomposed_outputs = Vec::with_capacity(input_gates.len() * self.packed_limbs);
         for g in input_gates {
-            let isolated = LtIsolateGadget::isolate_coeffs(&mut self.original_circuit, g, k, lt_isolate_id, ring_dim);
+            let isolated = LtIsolateGadget::isolate_coeffs(
+                &mut self.original_circuit,
+                g,
+                k,
+                lt_isolate_id,
+                ring_dim,
+            );
             decomposed_outputs.extend(isolated);
         }
         self.original_circuit.output(decomposed_outputs);
     }
 
-    // If you *need* a subcircuit, re-register the lookup *inside* it.
     pub fn create_isolate_coeffs_subcircuit(
         &self,
         params: &<P as Poly>::Params,
-        k: usize,        // usually self.packed_limbs - 1
-        ring_dim: usize, // params.ring_dimension() as usize
+        k: usize,
+        ring_dim: usize,
     ) -> PolyCircuit<P> {
         let mut sc = PolyCircuit::<P>::new();
         let lt_isolate_id = LtIsolateGadget::register_general_lt_isolate_lookup(&mut sc, params, k);
