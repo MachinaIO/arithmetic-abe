@@ -18,8 +18,8 @@ where
     BigUint::from_str(&s).map_err(de::Error::custom)
 }
 
-fn default_trapdoor_sigma() -> Option<f64> {
-    Some(4.578)
+fn default_trapdoor_sigma() -> f64 {
+    4.578
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,7 +39,7 @@ pub struct Config {
     )]
     pub switched_modulus: BigUint,
     #[serde(default = "default_trapdoor_sigma")]
-    pub trapdoor_sigma: Option<f64>,
+    pub trapdoor_sigma: f64,
     /// polynomial ring dimension
     pub ring_dimension: u32,
     /// bit size of the base for the gadget vector and decomposition

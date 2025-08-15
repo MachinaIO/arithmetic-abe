@@ -1,3 +1,9 @@
+use crate::{
+    ciphertext::Ciphertext,
+    circuit::ArithmeticCircuit,
+    functional_key::FuncSK,
+    master_key::{MasterPK, MasterSK},
+};
 use mxx::circuit::gate::GateId;
 use mxx::element::PolyElem;
 use mxx::lookup::simple_eval::SimpleBggPubKeyEvaluator;
@@ -16,13 +22,6 @@ use mxx::{
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::{
-    ciphertext::Ciphertext,
-    circuit::ArithmeticCircuit,
-    functional_key::FuncSK,
-    master_key::{MasterPK, MasterSK},
-};
-
 const TAG_BGG_PUBKEY: &[u8] = b"BGG_PUBKEY";
 
 pub struct KeyPolicyABE<
@@ -31,6 +30,7 @@ pub struct KeyPolicyABE<
     ST: PolyTrapdoorSampler<M = M> + Clone + Send + Sync,
     SU: PolyUniformSampler<M = M> + Send + Sync,
 > {
+    pub p_sigma: f64,
     pub limb_bit_size: usize,
     pub num_crt_limbs: usize,
     pub crt_depth: usize,
@@ -70,7 +70,6 @@ impl<
         mpk: MasterPK<M>,
         inputs: &[u64],
         message: bool,
-        p_sigma: f64,
     ) -> Ciphertext<M> {
         let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
         let num_packed_poly_inputs = total_limbs.div_ceil(mpk.packed_limbs);
@@ -116,15 +115,19 @@ impl<
             &params,
             1,
             1,
-            DistType::GaussDist { sigma: p_sigma },
+            DistType::GaussDist {
+                sigma: self.p_sigma,
+            },
         );
         let c_b_epsilon_error = &self.uniform_sampler.sample_uniform(
             &params,
             1,
             self.d * (2 + params.modulus_digits()),
-            DistType::GaussDist { sigma: p_sigma },
+            DistType::GaussDist {
+                sigma: self.p_sigma,
+            },
         );
-        let bgg_sampler = BGGEncodingSampler::new(&params, &s.get_row(0), SU::new(), p_sigma);
+        let bgg_sampler = BGGEncodingSampler::new(&params, &s.get_row(0), SU::new(), self.p_sigma);
         let bgg_encodings = bgg_sampler.sample(&params, &pubkeys, &packed_inputs);
         log_mem("finish bgg_encodings");
         let c_b_epsilon = s.clone() * mpk.b_epsilon + c_b_epsilon_error;
@@ -194,12 +197,7 @@ impl<
             &mpk.u,
         );
 
-        FuncSK {
-            arith_circuit,
-            a_f,
-            u_f,
-            dir_path,
-        }
+        FuncSK { a_f, u_f, dir_path }
     }
 
     pub fn dec(
@@ -207,17 +205,18 @@ impl<
         params: <M::P as Poly>::Params,
         ct: Ciphertext<M>,
         mpk: MasterPK<M>,
-        mut fsk: FuncSK<M>,
+        fsk: FuncSK<M>,
+        mut arith_circuit: ArithmeticCircuit<M::P>,
     ) -> bool {
         let ring_dim = params.ring_dimension() as usize;
-        let k = fsk.arith_circuit.packed_limbs.saturating_sub(1);
+        let k = arith_circuit.packed_limbs.saturating_sub(1);
         let lt_isolate_id = LtIsolateGadget::register_general_lt_isolate_lookup(
-            &mut fsk.arith_circuit.original_circuit,
+            &mut arith_circuit.original_circuit,
             &params,
             k,
         );
-        fsk.arith_circuit.to_poly_circuit(lt_isolate_id, ring_dim);
-        let poly_circuit = fsk.arith_circuit.original_circuit.clone();
+        arith_circuit.to_poly_circuit(lt_isolate_id, ring_dim);
+        let poly_circuit = arith_circuit.original_circuit.clone();
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
         let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
         let num_packed_poly_inputs = total_limbs.div_ceil(mpk.packed_limbs);
