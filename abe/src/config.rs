@@ -18,6 +18,25 @@ where
     BigUint::from_str(&s).map_err(de::Error::custom)
 }
 
+fn vec_biguint_to_string<S>(values: &Vec<BigUint>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let strings: Vec<String> = values.iter().map(|v| v.to_str_radix(10)).collect();
+    strings.serialize(serializer)
+}
+
+fn vec_biguint_from_string<'de, D>(deserializer: D) -> Result<Vec<BigUint>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let strings: Vec<String> = Vec::deserialize(deserializer)?;
+    strings
+        .into_iter()
+        .map(|s| BigUint::from_str(&s).map_err(de::Error::custom))
+        .collect()
+}
+
 fn default_trapdoor_sigma() -> f64 {
     4.578
 }
@@ -44,5 +63,9 @@ pub struct Config {
     pub ring_dimension: u32,
     /// bit size of the base for the gadget vector and decomposition
     pub base_bits: u32,
-    pub input: Vec<u64>,
+    #[serde(
+        serialize_with = "vec_biguint_to_string",
+        deserialize_with = "vec_biguint_from_string"
+    )]
+    pub input: Vec<BigUint>,
 }

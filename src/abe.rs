@@ -19,6 +19,7 @@ use mxx::{
     poly::{Poly, PolyParams},
     sampler::{DistType, PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler},
 };
+use num_bigint::BigUint;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -68,22 +69,17 @@ impl<
         &self,
         params: <M::P as Poly>::Params,
         mpk: MasterPK<M>,
-        inputs: &[u64],
+        inputs: &[BigUint],
         message: bool,
     ) -> Ciphertext<M> {
         let total_limbs = self.num_crt_limbs * self.crt_depth * mpk.num_inputs;
         let num_packed_poly_inputs = total_limbs.div_ceil(mpk.packed_limbs);
-        log_mem(format!("total_limbs {}", total_limbs));
         let reveal_plaintexts = vec![true; num_packed_poly_inputs + 1];
         let s = &self
             .uniform_sampler
             .sample_uniform(&params, 1, self.d, DistType::BitDist);
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
-        log_mem("sampled s");
         let pubkeys = bgg_pubkey_sampler.sample(&params, &TAG_BGG_PUBKEY, &reveal_plaintexts);
-        let (moduli, _, _) = params.to_crt();
-        assert_eq!(moduli.len(), self.crt_depth);
-        log_mem("finish pubkeys");
         let mut outputs: Vec<GateId> = Vec::with_capacity(mpk.num_inputs);
         let mut circuit = PolyCircuit::<M::P>::new();
         let inputs_gates = circuit.input(total_limbs);
@@ -102,7 +98,6 @@ impl<
         }
         assert_eq!(outputs.len(), total_limbs);
         circuit.output(outputs);
-
         let packed_inputs: Vec<M::P> = CrtPoly::<M::P>::generate_input_values_from_single(
             &params,
             &ctx,
@@ -110,7 +105,6 @@ impl<
             self.limb_bit_size,
         );
         assert_eq!(num_packed_poly_inputs, packed_inputs.len());
-        // todo: gauss_sigma and p_sigma
         let e_cu = &self.uniform_sampler.sample_uniform(
             &params,
             1,
@@ -129,7 +123,6 @@ impl<
         );
         let bgg_sampler = BGGEncodingSampler::new(&params, &s.get_row(0), SU::new(), self.p_sigma);
         let bgg_encodings = bgg_sampler.sample(&params, &pubkeys, &packed_inputs);
-        log_mem("finish bgg_encodings");
         let c_b_epsilon = s.clone() * mpk.b_epsilon + c_b_epsilon_error;
         let boolean_msg = if message {
             <M::P as Poly>::Elem::one(&params.modulus())
