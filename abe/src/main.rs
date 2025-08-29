@@ -3,12 +3,11 @@ use crate::config::Config;
 use anyhow::Result;
 use arithmetic_abe::abe::KeyPolicyABE;
 use arithmetic_abe::ciphertext::Ciphertext;
-use arithmetic_abe::circuit::ArithmeticCircuit;
 use arithmetic_abe::keys::{FuncSK, MasterPK, MasterSK};
 use clap::{Parser, Subcommand};
 use keccak_asm::Keccak256;
+use mxx::arithmetic::circuit::{ArithGateId, ArithmeticCircuit};
 use mxx::{
-    circuit::PolyCircuit,
     matrix::dcrt_poly::DCRTPolyMatrix,
     poly::dcrt::{params::DCRTPolyParams, poly::DCRTPoly},
     sampler::{
@@ -48,18 +47,19 @@ fn init_logging() {
     fmt().with_env_filter(env_filter).with_target(true).init();
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     init_logging();
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run { config } => run_env_configured(config)?,
+        Commands::Run { config } => run_env_configured(config).await?,
     }
 
     Ok(())
 }
 
-fn run_env_configured(config: PathBuf) -> Result<()> {
+async fn run_env_configured(config: PathBuf) -> Result<()> {
     let contents = fs::read_to_string(&config).unwrap();
     let cfg: Config = toml::from_str(&contents).unwrap();
     let params = DCRTPolyParams::new(
@@ -68,15 +68,6 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
         cfg.crt_bits,
         cfg.base_bits,
     );
-    let base_circuit: ArithmeticCircuit<DCRTPoly> = ArithmeticCircuit {
-        limb_bit_size: cfg.limb_bit_size,
-        crt_bits: cfg.crt_bits,
-        crt_depth: cfg.crt_depth,
-        num_crt_limbs: cfg.num_inputs,
-        packed_limbs: cfg.packed_limbs,
-        num_inputs: cfg.num_inputs,
-        original_circuit: PolyCircuit::new(),
-    };
 
     let uniform_sampler = DCRTPolyUniformSampler::new();
     let hash_sampler = DCRTPolyHashSampler::<Keccak256>::new();
@@ -96,16 +87,27 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
         trapdoor_sampler,
         uniform_sampler,
         p_sigma: cfg.p_sigma,
+        use_packing: false,
     };
 
     let mut t_setup = Duration::ZERO;
-    let mut t_keygen = Duration::ZERO;
+    // let mut t_keygen = Duration::ZERO;
     let mut t_enc = Duration::ZERO;
     let mut t_dec = Duration::ZERO;
 
     info!(target: "abe",  "starting KeyPolicy ABE");
 
-    let arith = base_circuit.clone();
+    let mut arith = ArithmeticCircuit::<DCRTPoly>::setup(
+        &params,
+        cfg.limb_bit_size,
+        cfg.input.len(),
+        false,
+        true,
+    );
+    let add_idx = arith.add(ArithGateId::new(0), ArithGateId::new(1)); // a + b
+    let mul_idx = arith.mul(add_idx, ArithGateId::new(2)); // (a + b) * c
+    let final_idx = arith.sub(mul_idx, ArithGateId::new(0)); // (a + b) * c - a
+    arith.output(final_idx);
 
     // 1) setup
     let (mpk, msk): (
@@ -128,11 +130,9 @@ fn run_env_configured(config: PathBuf) -> Result<()> {
     );
 
     // 2) keygen
-    let fsk: FuncSK<DCRTPolyMatrix> = timed_read(
-        "keygen",
-        || abe.keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone()),
-        &mut t_keygen,
-    );
+    let fsk: FuncSK<DCRTPolyMatrix> = abe
+        .keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone())
+        .await;
 
     // 4) dec
     let bit: bool = timed_read(
