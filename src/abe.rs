@@ -54,7 +54,7 @@ impl<
         packed_limbs: usize,
     ) -> (MasterPK<M>, MasterSK<M, ST>) {
         let seed: [u8; 32] = rand::random();
-        let (b_epsilon_trapdoor, b_epsilon) = self.trapdoor_sampler.trapdoor(&params, self.d + 1);
+        let (b_epsilon_trapdoor, b_epsilon) = self.trapdoor_sampler.trapdoor(&params, self.d);
         let b_epsilon_trapdoor = Arc::new(b_epsilon_trapdoor);
         let b_epsilon = Arc::new(b_epsilon);
         let u = self
@@ -95,6 +95,7 @@ impl<
         let reveal_plaintexts = vec![true; num_given_input_polys + 1];
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, self.d);
         let pubkeys = bgg_pubkey_sampler.sample(&params, TAG_BGG_PUBKEY, &reveal_plaintexts);
+        // todo: error should be sampled
         let bgg_encodings = bgg_encoding_sampler.sample(&params, &pubkeys, &plaintexts);
         let e_cu = &self.uniform_sampler.sample_poly(
             &params,

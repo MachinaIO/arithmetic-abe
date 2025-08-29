@@ -598,7 +598,7 @@ dependencies = [
 [[package]]
 name = "mxx"
 version = "0.1.0"
-source = "git+https://github.com/MachinaIO/mxx.git?branch=feat%2Flwe-lut%2Flimb-1#8515faf62822ead8014661eee45663efb0176fea"
+source = "git+https://github.com/MachinaIO/mxx.git?branch=feat%2Fcompatible-with-abe#c5f7a68c329aaf3c3b4a6958abd5118483cebdfe"
 dependencies = [
  "bincode",
  "bitvec",
