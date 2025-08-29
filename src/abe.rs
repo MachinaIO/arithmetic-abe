@@ -54,7 +54,7 @@ impl<
         packed_limbs: usize,
     ) -> (MasterPK<M>, MasterSK<M, ST>) {
         let seed: [u8; 32] = rand::random();
-        let (b_epsilon_trapdoor, b_epsilon) = self.trapdoor_sampler.trapdoor(&params, self.d);
+        let (b_epsilon_trapdoor, b_epsilon) = self.trapdoor_sampler.trapdoor(&params, self.d + 1);
         let b_epsilon_trapdoor = Arc::new(b_epsilon_trapdoor);
         let b_epsilon = Arc::new(b_epsilon);
         let u = self

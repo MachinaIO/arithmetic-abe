@@ -72,6 +72,7 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
     let uniform_sampler = DCRTPolyUniformSampler::new();
     let hash_sampler = DCRTPolyHashSampler::<Keccak256>::new();
     let trapdoor_sampler = DCRTPolyTrapdoorSampler::new(&params, cfg.trapdoor_sigma);
+    let use_packing = false;
     let abe = KeyPolicyABE::<
         DCRTPolyMatrix,
         DCRTPolyHashSampler<Keccak256>,
@@ -87,7 +88,7 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         trapdoor_sampler,
         uniform_sampler,
         p_sigma: cfg.p_sigma,
-        use_packing: false,
+        use_packing,
     };
 
     let mut t_setup = Duration::ZERO;
@@ -101,7 +102,7 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         &params,
         cfg.limb_bit_size,
         cfg.input.len(),
-        false,
+        use_packing,
         true,
     );
     let add_idx = arith.add(ArithGateId::new(0), ArithGateId::new(1)); // a + b
@@ -119,20 +120,19 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         &mut t_setup,
     );
 
+    // 2) keygen
+    let fsk: FuncSK<DCRTPolyMatrix> = abe
+        .keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone())
+        .await;
+
     // 3) enc
     assert_eq!(cfg.num_inputs, cfg.input.len());
-    // let inputs = make_inputs::<DCRTPoly>(&params, cfg.input);
     let msg_bit = cfg.message != 0;
     let ct: Ciphertext<DCRTPolyMatrix> = timed_read(
         "enc",
         || abe.enc(params.clone(), mpk.clone(), &cfg.input, msg_bit),
         &mut t_enc,
     );
-
-    // 2) keygen
-    let fsk: FuncSK<DCRTPolyMatrix> = abe
-        .keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone())
-        .await;
 
     // 4) dec
     let bit: bool = timed_read(
