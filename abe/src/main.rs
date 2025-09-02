@@ -11,8 +11,8 @@ use mxx::{
     matrix::dcrt_poly::DCRTPolyMatrix,
     poly::dcrt::{params::DCRTPolyParams, poly::DCRTPoly},
     sampler::{
-        PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler, hash::DCRTPolyHashSampler,
-        trapdoor::DCRTPolyTrapdoorSampler, uniform::DCRTPolyUniformSampler,
+        PolyTrapdoorSampler, hash::DCRTPolyHashSampler, trapdoor::DCRTPolyTrapdoorSampler,
+        uniform::DCRTPolyUniformSampler,
     },
     utils::timed_read,
 };
@@ -69,8 +69,6 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         cfg.base_bits,
     );
 
-    let uniform_sampler = DCRTPolyUniformSampler::new();
-    let hash_sampler = DCRTPolyHashSampler::<Keccak256>::new();
     let trapdoor_sampler = DCRTPolyTrapdoorSampler::new(&params, cfg.trapdoor_sigma);
     let use_packing = false;
     let abe = KeyPolicyABE::<
@@ -78,18 +76,16 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         DCRTPolyHashSampler<Keccak256>,
         DCRTPolyTrapdoorSampler,
         DCRTPolyUniformSampler,
-    > {
-        limb_bit_size: cfg.limb_bit_size,
-        num_crt_limbs: cfg.crt_bits.div_ceil(cfg.limb_bit_size),
-        crt_depth: cfg.crt_depth,
-        packed_limb: cfg.packed_limbs,
-        d: cfg.d,
-        hash_sampler,
-        trapdoor_sampler,
-        uniform_sampler,
-        p_sigma: cfg.p_sigma,
+    >::new(
+        cfg.limb_bit_size,
+        cfg.crt_bits.div_ceil(cfg.limb_bit_size),
+        cfg.crt_depth,
+        cfg.num_packed_limbs,
+        cfg.d,
+        cfg.e_b_sigma,
         use_packing,
-    };
+        trapdoor_sampler,
+    );
 
     let mut t_setup = Duration::ZERO;
     // let mut t_keygen = Duration::ZERO;
@@ -116,7 +112,7 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         MasterSK<DCRTPolyMatrix, DCRTPolyTrapdoorSampler>,
     ) = timed_read(
         "setup",
-        || abe.setup(params.clone(), cfg.num_inputs, cfg.packed_limbs),
+        || abe.setup(params.clone(), cfg.num_inputs, cfg.num_packed_limbs),
         &mut t_setup,
     );
 

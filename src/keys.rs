@@ -13,25 +13,25 @@ pub struct FuncSK<M: PolyMatrix> {
 #[derive(Clone)]
 pub struct MasterPK<M: PolyMatrix> {
     pub num_inputs: usize,
-    pub packed_limbs: usize,
+    pub num_packed_limbs: usize,
     pub seed: [u8; 32],
-    pub b_epsilon: Arc<M>,
+    pub b_matrix: Arc<M>,
     pub u: M,
 }
 
 impl<M: PolyMatrix> MasterPK<M> {
     pub fn new(
         num_inputs: usize,
-        packed_limbs: usize,
+        num_packed_limbs: usize,
         seed: [u8; 32],
-        b_epsilon: Arc<M>,
+        b_matrix: Arc<M>,
         u: M,
     ) -> Self {
         Self {
             num_inputs,
-            packed_limbs,
+            num_packed_limbs,
             seed,
-            b_epsilon,
+            b_matrix,
             u,
         }
     }
@@ -39,11 +39,11 @@ impl<M: PolyMatrix> MasterPK<M> {
 
 #[derive(Clone)]
 pub struct MasterSK<M: PolyMatrix, ST: PolyTrapdoorSampler<M = M>> {
-    pub b_epsilon_trapdoor: Arc<ST::Trapdoor>,
+    pub b_trapdoor: Arc<ST::Trapdoor>,
 }
 
 impl<M: PolyMatrix, ST: PolyTrapdoorSampler<M = M>> MasterSK<M, ST> {
-    pub fn new(b_epsilon_trapdoor: Arc<ST::Trapdoor>) -> Self {
-        Self { b_epsilon_trapdoor }
+    pub fn new(b_trapdoor: Arc<ST::Trapdoor>) -> Self {
+        Self { b_trapdoor }
     }
 }
