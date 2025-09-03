@@ -115,10 +115,23 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         || abe.setup(params.clone(), cfg.num_inputs, cfg.num_packed_limbs),
         &mut t_setup,
     );
+    let config: PathBuf = "keygen".into();
+    let dir_path = if config.exists() {
+        config
+    } else {
+        fs::create_dir_all(&config)?;
+        config
+    };
 
     // 2) keygen
     let fsk: FuncSK<DCRTPolyMatrix> = abe
-        .keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone())
+        .keygen(
+            params.clone(),
+            mpk.clone(),
+            msk.clone(),
+            arith.clone(),
+            dir_path,
+        )
         .await;
 
     // 3) enc
