@@ -118,7 +118,7 @@ impl<
             biguints_to_packed_crt_polys(self.limb_bit_size, &params, inputs)
         } else {
             inputs
-                .into_iter()
+                .iter()
                 .flat_map(|input| biguint_to_crt_poly(self.limb_bit_size, &params, input))
                 .collect()
         };
@@ -178,8 +178,8 @@ impl<
         mpk: MasterPK<M>,
         msk: MasterSK<M, ST>,
         arith_circuit: ArithmeticCircuit<M::P>,
+        dir_path: PathBuf,
     ) -> FuncSK<M> {
-        let dir_path: PathBuf = "keygen".into();
         let result = arith_circuit
             .evaluate_with_bgg_pubkey::<M, SH, ST, SU>(
                 &params,
