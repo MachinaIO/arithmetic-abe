@@ -1,7 +1,7 @@
 num_inputs = 3
 num_packed_limbs = 1
-limb_bit_size = 5
-crt_depth = 3
+limb_bit_size = 3
+crt_depth = 2
 crt_bits = 17
 d = 1
 e_b_sigma = 0.0

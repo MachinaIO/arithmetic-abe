@@ -98,7 +98,7 @@ impl<
         let num_inputs = inputs.len();
         let uniform_sampler = SU::new();
         let s = uniform_sampler.sample_uniform(&params, 1, self.d, DistType::TernaryDist);
-        let b_col_size = self.d * (1 + params.modulus_digits());
+        let b_col_size = 2 * self.d + self.d * params.modulus_digits();
         let c_b_error = {
             let minus_one = M::P::const_minus_one(&params);
             let first_part = s.clone() * minus_one;
@@ -110,7 +110,7 @@ impl<
                     sigma: self.e_b_sigma,
                 },
             );
-            first_part.concat_rows(&[&uniform_errors])
+            first_part.concat_columns(&[&uniform_errors])
         };
         let c_b = s.clone() * mpk.b_matrix.as_ref() + c_b_error.clone();
         let bgg_encoding_sampler = BGGEncodingSampler::<SU>::new(&params, &s.get_row(0), None);
