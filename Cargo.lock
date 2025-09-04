@@ -605,7 +605,7 @@ dependencies = [
 [[package]]
 name = "mxx"
 version = "0.1.0"
-source = "git+https://github.com/MachinaIO/mxx.git?branch=batch%2Fabe#75521f296658d100c0ed43530a5efa6889017432"
+source = "git+https://github.com/MachinaIO/mxx.git?branch=batch%2Fabe#598da7c85204b93c0d4a526a863f9cd5016db753"
 dependencies = [
  "bincode",
  "bitvec",

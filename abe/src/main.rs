@@ -69,7 +69,8 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         cfg.base_bits,
     );
 
-    let trapdoor_sampler = DCRTPolyTrapdoorSampler::new(&params, cfg.trapdoor_sigma);
+    let trapdoor_sampler =
+        DCRTPolyTrapdoorSampler::new(&params, cfg.trapdoor_sigma.expect("trapdoor sigma exist"));
     let use_packing = false;
     let abe = KeyPolicyABE::<
         DCRTPolyMatrix,
@@ -123,6 +124,8 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         config
     };
 
+    info!(target: "abe",  "finished setup");
+
     // 2) keygen
     let fsk: FuncSK<DCRTPolyMatrix> = abe
         .keygen(
@@ -136,12 +139,13 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
 
     // 3) enc
     assert_eq!(cfg.num_inputs, cfg.input.len());
-    let msg_bit = cfg.message != 0;
     let ct: Ciphertext<DCRTPolyMatrix> = timed_read(
         "enc",
-        || abe.enc(params.clone(), mpk.clone(), &cfg.input, msg_bit),
+        || abe.enc(params.clone(), mpk.clone(), &cfg.input, cfg.message),
         &mut t_enc,
     );
+
+    info!(target: "abe", expected_result = cfg.message, "finished encryption");
 
     // 4) dec
     let bit: bool = timed_read(
@@ -150,7 +154,7 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         &mut t_dec,
     );
 
-    info!(target: "abe", dec_result = bit, "decryption finished");
+    info!(target: "abe", dec_result = bit, "finished decryption");
 
     Ok(())
 }

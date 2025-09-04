@@ -101,7 +101,7 @@ impl<
         let b_col_size = 2 * self.d + self.d * params.modulus_digits();
         let c_b_error = {
             let minus_one = M::P::const_minus_one(&params);
-            let first_part = s.clone() * minus_one;
+            let first_part = s.clone() * &minus_one;
             let uniform_errors = uniform_sampler.sample_uniform(
                 &params,
                 1,
@@ -112,7 +112,7 @@ impl<
             );
             first_part.concat_columns(&[&uniform_errors])
         };
-        let c_b = s.clone() * mpk.b_matrix.as_ref() + c_b_error.clone();
+        let c_b = s.clone() * mpk.b_matrix.as_ref() + &c_b_error;
         let bgg_encoding_sampler = BGGEncodingSampler::<SU>::new(&params, &s.get_row(0), None);
         let plaintexts = if self.use_packing {
             biguints_to_packed_crt_polys(self.limb_bit_size, &params, inputs)
@@ -163,7 +163,7 @@ impl<
                 sigma: self.e_b_sigma,
             },
         );
-        let c_u = (s.clone() * mpk.u.clone() + e_u).get_row(0)[0].clone() + scale;
+        let c_u = (s * mpk.u + e_u).get_row(0)[0].clone() + scale;
 
         Ciphertext {
             bgg_encodings,
@@ -223,8 +223,8 @@ impl<
         );
         // 5. Let `c_f := s^T*A_f + e_{c_f}` in $\mathcal{R}_{q}^{1 \times m}$
         // be the BGG+ encoding corresponding to the output wire of `poly_circuit`.
-        let v = ct.c_b.concat_rows(&[&result[0].vector]) * fsk.u_f;
-        let z = ct.c_u - v.get_row(0)[0].clone();
+        let v = ct.c_b.concat_columns(&[&result[0].vector]) * fsk.u_f;
+        let z = ct.c_u - &v.get_row(0)[0];
         z.extract_bits_with_threshold(&params)[0]
     }
 }
