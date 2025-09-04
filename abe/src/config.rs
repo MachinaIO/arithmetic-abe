@@ -16,10 +16,7 @@ where
     D: Deserializer<'de>,
 {
     let strings: Vec<String> = Vec::deserialize(deserializer)?;
-    strings
-        .into_iter()
-        .map(|s| BigUint::from_str(&s).map_err(de::Error::custom))
-        .collect()
+    strings.into_iter().map(|s| BigUint::from_str(&s).map_err(de::Error::custom)).collect()
 }
 
 fn default_trapdoor_sigma() -> Option<f64> {

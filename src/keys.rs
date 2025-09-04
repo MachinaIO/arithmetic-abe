@@ -1,7 +1,5 @@
-use mxx::matrix::PolyMatrix;
-use mxx::sampler::PolyTrapdoorSampler;
-use std::path::PathBuf;
-use std::sync::Arc;
+use mxx::{matrix::PolyMatrix, sampler::PolyTrapdoorSampler};
+use std::{path::PathBuf, sync::Arc};
 
 #[derive(Clone)]
 pub struct FuncSK<M: PolyMatrix> {
@@ -27,13 +25,7 @@ impl<M: PolyMatrix> MasterPK<M> {
         b_matrix: Arc<M>,
         u: M,
     ) -> Self {
-        Self {
-            num_inputs,
-            num_packed_limbs,
-            seed,
-            b_matrix,
-            u,
-        }
+        Self { num_inputs, num_packed_limbs, seed, b_matrix, u }
     }
 }
 

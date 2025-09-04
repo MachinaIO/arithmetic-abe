@@ -1,13 +1,15 @@
 pub mod config;
 use crate::config::Config;
 use anyhow::Result;
-use arithmetic_abe::abe::KeyPolicyABE;
-use arithmetic_abe::ciphertext::Ciphertext;
-use arithmetic_abe::keys::{FuncSK, MasterPK, MasterSK};
+use arithmetic_abe::{
+    abe::KeyPolicyABE,
+    ciphertext::Ciphertext,
+    keys::{FuncSK, MasterPK, MasterSK},
+};
 use clap::{Parser, Subcommand};
 use keccak_asm::Keccak256;
-use mxx::arithmetic::circuit::{ArithGateId, ArithmeticCircuit};
 use mxx::{
+    arithmetic::circuit::{ArithGateId, ArithmeticCircuit},
     matrix::dcrt_poly::DCRTPolyMatrix,
     poly::dcrt::{params::DCRTPolyParams, poly::DCRTPoly},
     sampler::{
@@ -16,18 +18,12 @@ use mxx::{
     },
     utils::timed_read,
 };
-use std::{env, fs};
-use std::{path::PathBuf, time::Duration};
+use std::{env, fs, path::PathBuf, time::Duration};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "abe",
-    version,
-    author,
-    about = "Key-Policy ABE runner (env-configured)"
-)]
+#[command(name = "abe", version, author, about = "Key-Policy ABE runner (env-configured)")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -62,12 +58,8 @@ async fn main() -> Result<()> {
 async fn run_env_configured(config: PathBuf) -> Result<()> {
     let contents = fs::read_to_string(&config).unwrap();
     let cfg: Config = toml::from_str(&contents).unwrap();
-    let params = DCRTPolyParams::new(
-        cfg.ring_dimension,
-        cfg.crt_depth,
-        cfg.crt_bits,
-        cfg.base_bits,
-    );
+    let params =
+        DCRTPolyParams::new(cfg.ring_dimension, cfg.crt_depth, cfg.crt_bits, cfg.base_bits);
 
     let trapdoor_sampler =
         DCRTPolyTrapdoorSampler::new(&params, cfg.trapdoor_sigma.expect("trapdoor sigma exist"));
@@ -108,14 +100,12 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
     arith.output(final_idx);
 
     // 1) setup
-    let (mpk, msk): (
-        MasterPK<DCRTPolyMatrix>,
-        MasterSK<DCRTPolyMatrix, DCRTPolyTrapdoorSampler>,
-    ) = timed_read(
-        "setup",
-        || abe.setup(params.clone(), cfg.num_inputs, cfg.num_packed_limbs),
-        &mut t_setup,
-    );
+    let (mpk, msk): (MasterPK<DCRTPolyMatrix>, MasterSK<DCRTPolyMatrix, DCRTPolyTrapdoorSampler>) =
+        timed_read(
+            "setup",
+            || abe.setup(params.clone(), cfg.num_inputs, cfg.num_packed_limbs),
+            &mut t_setup,
+        );
     let config: PathBuf = "keygen".into();
     let dir_path = if config.exists() {
         config
@@ -127,15 +117,8 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
     info!(target: "abe",  "finished setup");
 
     // 2) keygen
-    let fsk: FuncSK<DCRTPolyMatrix> = abe
-        .keygen(
-            params.clone(),
-            mpk.clone(),
-            msk.clone(),
-            arith.clone(),
-            dir_path,
-        )
-        .await;
+    let fsk: FuncSK<DCRTPolyMatrix> =
+        abe.keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone(), dir_path).await;
 
     // 3) enc
     assert_eq!(cfg.num_inputs, cfg.input.len());

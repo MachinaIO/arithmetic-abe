@@ -1,24 +1,25 @@
 use crate::{
     ciphertext::Ciphertext,
-    keys::FuncSK,
-    keys::{MasterPK, MasterSK},
+    keys::{FuncSK, MasterPK, MasterSK},
 };
-use mxx::element::PolyElem;
 use mxx::{
     arithmetic::circuit::ArithmeticCircuit,
-    gadgets::{crt::num_limbs_of_crt_poly, packed_crt::num_packed_crt_poly},
-};
-use mxx::{bgg::encoding::BggEncoding, gadgets::packed_crt::biguints_to_packed_crt_polys};
-use mxx::{
-    bgg::sampler::{BGGEncodingSampler, BGGPublicKeySampler},
+    bgg::{
+        encoding::BggEncoding,
+        sampler::{BGGEncodingSampler, BGGPublicKeySampler},
+    },
+    element::PolyElem,
+    gadgets::{
+        crt::{biguint_to_crt_poly, num_limbs_of_crt_poly},
+        packed_crt::{biguints_to_packed_crt_polys, num_packed_crt_poly},
+    },
+    lookup::lwe_eval::LweBggEncodingPltEvaluator,
     matrix::PolyMatrix,
     poly::{Poly, PolyParams},
     sampler::{DistType, PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler},
 };
-use mxx::{gadgets::crt::biguint_to_crt_poly, lookup::lwe_eval::LweBggEncodingPltEvaluator};
 use num_bigint::BigUint;
-use std::sync::Arc;
-use std::{marker::PhantomData, path::PathBuf};
+use std::{marker::PhantomData, path::PathBuf, sync::Arc};
 
 const TAG_BGG_PUBKEY: &[u8] = b"BGG_PUBKEY";
 
@@ -106,9 +107,7 @@ impl<
                 &params,
                 1,
                 b_col_size - self.d,
-                DistType::GaussDist {
-                    sigma: self.e_b_sigma,
-                },
+                DistType::GaussDist { sigma: self.e_b_sigma },
             );
             first_part.concat_columns(&[&uniform_errors])
         };
@@ -152,24 +151,18 @@ impl<
             .collect::<Vec<_>>();
         let scale = M::P::from_elem_to_constant(
             &params,
-            &(<M::P as Poly>::Elem::half_q(&params.modulus())
-                * <M::P as Poly>::Elem::new(message, params.modulus())),
+            &(<M::P as Poly>::Elem::half_q(&params.modulus()) *
+                <M::P as Poly>::Elem::new(message, params.modulus())),
         );
         let e_u = uniform_sampler.sample_uniform(
             &params,
             1,
             1,
-            DistType::GaussDist {
-                sigma: self.e_b_sigma,
-            },
+            DistType::GaussDist { sigma: self.e_b_sigma },
         );
         let c_u = (s * mpk.u + e_u).get_row(0)[0].clone() + scale;
 
-        Ciphertext {
-            bgg_encodings,
-            c_b,
-            c_u,
-        }
+        Ciphertext { bgg_encodings, c_b, c_u }
     }
 
     pub async fn keygen(
