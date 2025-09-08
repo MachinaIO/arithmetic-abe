@@ -65,6 +65,7 @@ async fn main() -> Result<()> {
 }
 
 async fn run_env_configured(config: PathBuf, height: usize, data_dir: PathBuf) -> Result<()> {
+    assert_ne!(height, 0);
     let contents = fs::read_to_string(&config).unwrap();
     let cfg: Config = toml::from_str(&contents).unwrap();
     let params =
