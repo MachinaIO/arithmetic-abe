@@ -34,6 +34,13 @@ enum Commands {
     Run {
         #[arg(short, long)]
         config: PathBuf,
+
+        /// height of the binary tree. Input length should be 2^height
+        #[arg(short, long)]
+        height: usize,
+
+        #[arg(short, long)]
+        data_dir: PathBuf,
     },
 }
 
@@ -49,13 +56,15 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run { config } => run_env_configured(config).await?,
+        Commands::Run { config, height, data_dir } => {
+            run_env_configured(config, height, data_dir).await?
+        }
     }
 
     Ok(())
 }
 
-async fn run_env_configured(config: PathBuf) -> Result<()> {
+async fn run_env_configured(config: PathBuf, height: usize, data_dir: PathBuf) -> Result<()> {
     let contents = fs::read_to_string(&config).unwrap();
     let cfg: Config = toml::from_str(&contents).unwrap();
     let params =
@@ -94,10 +103,36 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         use_packing,
         true,
     );
-    let add_idx = arith.add(ArithGateId::new(0), ArithGateId::new(1)); // a + b
-    let mul_idx = arith.mul(add_idx, ArithGateId::new(2)); // (a + b) * c
-    let final_idx = arith.sub(mul_idx, ArithGateId::new(0)); // (a + b) * c - a
-    arith.output(final_idx);
+    let num_leaves = 1 << (height - 1);
+    assert!(
+        cfg.input.len() >= num_leaves * 2,
+        "Need at least {} inputs for height {} tree",
+        num_leaves * 2,
+        height
+    );
+
+    let mut current_layer = Vec::new();
+    for i in 0..num_leaves {
+        let left_idx = ArithGateId::new(i * 2);
+        let right_idx = ArithGateId::new(i * 2 + 1);
+        let mul_gate = arith.mul(left_idx, right_idx);
+        current_layer.push(mul_gate);
+    }
+    for _ in 1..height {
+        let mut next_layer = Vec::new();
+        let pairs_in_layer = current_layer.len() / 2;
+
+        for i in 0..pairs_in_layer {
+            let left = current_layer[i * 2];
+            let right = current_layer[i * 2 + 1];
+            let mul_gate = arith.mul(left, right);
+            next_layer.push(mul_gate);
+        }
+
+        current_layer = next_layer;
+    }
+    assert_eq!(current_layer.len(), 1, "Should have exactly one root gate");
+    arith.output(current_layer[0]);
 
     // 1) setup
     let (mpk, msk): (MasterPK<DCRTPolyMatrix>, MasterSK<DCRTPolyMatrix, DCRTPolyTrapdoorSampler>) =
@@ -106,12 +141,12 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
             || abe.setup(params.clone(), cfg.num_inputs, cfg.num_packed_limbs),
             &mut t_setup,
         );
-    let config: PathBuf = "keygen".into();
-    let dir_path = if config.exists() {
-        config
+
+    let dir_path = if data_dir.exists() {
+        data_dir
     } else {
-        fs::create_dir_all(&config)?;
-        config
+        fs::create_dir_all(&data_dir)?;
+        data_dir
     };
 
     info!(target: "abe",  "finished setup");
