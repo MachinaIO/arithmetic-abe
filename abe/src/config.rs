@@ -49,6 +49,7 @@ pub struct Config {
     pub crt_depth: usize,
     pub crt_bits: usize,
     pub d: usize,
+    pub knapsack_size: Option<usize>,
     pub e_b_sigma: f64,
     pub message: u8,
     pub circuit_path: Option<String>,

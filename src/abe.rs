@@ -34,6 +34,7 @@ pub struct KeyPolicyABE<
     pub crt_depth: usize,
     pub num_packed_limbs: usize,
     pub d: usize,
+    pub knapsack_size: Option<usize>,
     pub use_packing: bool,
     pub trapdoor_sampler: ST,
     _sh: PhantomData<SH>,
@@ -53,6 +54,7 @@ impl<
         crt_depth: usize,
         num_packed_limbs: usize,
         d: usize,
+        knapsack_size: Option<usize>,
         e_b_sigma: f64,
         use_packing: bool,
         trapdoor_sampler: ST,
@@ -63,6 +65,7 @@ impl<
             crt_depth,
             num_packed_limbs,
             d,
+            knapsack_size,
             e_b_sigma,
             use_packing,
             trapdoor_sampler,
@@ -98,7 +101,7 @@ impl<
         let num_inputs = inputs.len();
         let uniform_sampler = SU::new();
         let s = uniform_sampler.sample_uniform(&params, 1, self.d, DistType::TernaryDist);
-        let b_col_size = self.d * (1 + params.modulus_digits());
+        let b_col_size = self.d * (2 + params.modulus_digits());
         let c_b_error = {
             let minus_one = M::P::const_minus_one(&params);
             let first_part = s.clone() * minus_one;
@@ -110,7 +113,7 @@ impl<
                     sigma: self.e_b_sigma,
                 },
             );
-            first_part.concat_rows(&[&uniform_errors])
+            first_part.concat_columns(&[&uniform_errors])
         };
         let c_b = s.clone() * mpk.b_matrix.as_ref() + c_b_error.clone();
         let bgg_encoding_sampler = BGGEncodingSampler::<SU>::new(&params, &s.get_row(0), None);
@@ -132,16 +135,24 @@ impl<
         let pubkeys = bgg_pubkey_sampler.sample(&params, TAG_BGG_PUBKEY, &reveal_plaintexts);
         let bgg_encodings_no_error = bgg_encoding_sampler.sample(&params, &pubkeys, &plaintexts);
         let encode_col_size = self.d * params.modulus_digits();
+        let knapsack_size = self.knapsack_size.unwrap_or(b_col_size);
         let bgg_encodings = bgg_encodings_no_error
             .into_iter()
             .map(|encode| {
-                let s_matrix = uniform_sampler.sample_uniform(
+                let mut r_matrix = uniform_sampler.sample_uniform(
                     &params,
-                    b_col_size,
+                    knapsack_size,
                     encode_col_size,
                     DistType::TernaryDist,
                 );
-                let error = c_b_error.clone() * s_matrix;
+                if knapsack_size < b_col_size {
+                    r_matrix = r_matrix.concat_rows(&[&M::zero(
+                        &params,
+                        b_col_size - knapsack_size,
+                        encode_col_size,
+                    )]);
+                }
+                let error = c_b_error.clone() * r_matrix;
                 let new_vector = encode.vector + error;
                 BggEncoding {
                     vector: new_vector,

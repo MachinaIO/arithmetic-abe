@@ -82,6 +82,7 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         cfg.crt_depth,
         cfg.num_packed_limbs,
         cfg.d,
+        cfg.knapsack_size,
         cfg.e_b_sigma,
         use_packing,
         trapdoor_sampler,
@@ -115,11 +116,12 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         || abe.setup(params.clone(), cfg.num_inputs, cfg.num_packed_limbs),
         &mut t_setup,
     );
+    info!("setup done");
 
     // 2) keygen
-    let fsk: FuncSK<DCRTPolyMatrix> = abe
-        .keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone())
-        .await;
+    // let fsk: FuncSK<DCRTPolyMatrix> = abe
+    //     .keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone())
+    //     .await;
 
     // 3) enc
     assert_eq!(cfg.num_inputs, cfg.input.len());
@@ -131,13 +133,13 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
     );
 
     // 4) dec
-    let bit: bool = timed_read(
-        "dec",
-        || abe.dec(params.clone(), ct, mpk.clone(), fsk.clone(), arith.clone()),
-        &mut t_dec,
-    );
+    // let bit: bool = timed_read(
+    //     "dec",
+    //     || abe.dec(params.clone(), ct, mpk.clone(), fsk.clone(), arith.clone()),
+    //     &mut t_dec,
+    // );
 
-    info!(target: "abe", dec_result = bit, "decryption finished");
+    // info!(target: "abe", dec_result = bit, "decryption finished");
 
     Ok(())
 }
