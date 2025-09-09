@@ -11,13 +11,23 @@ pub enum SimulatorError {
     Estimator(#[from] EstimatorCliError),
     /// No knapsack length in [1, max_knapsack_len] reached the target security.
     #[error(
+        "secure ring dimension len not found for secpar={target_secpar}, crt_bits={crt_bits}, crt_depth={crt_depth}, base_bits={base_bits}"
+    )]
+    RingDimNotFound {
+        target_secpar: u64,
+        crt_bits: u64,
+        crt_depth: u64,
+        base_bits: u64,
+        log_dim_range: (u32, u32),
+    },
+    /// No knapsack length in [1, max_knapsack_len] reached the target security.
+    #[error(
         "secure knapsack len not found for secpar={target_secpar}, ring_dim={ring_dim}, max_knapsack_len={max_knapsack_len}, q={q}"
     )]
-    /// Could not find a knapsack_len that reaches the target security.
     KnapsackNotFound {
         target_secpar: u64,
         ring_dim: BigUint,
-        max_knapsack_len: usize,
+        max_knapsack_len: u64,
         q: BigUint,
     },
     /// Could not find a log_alpha that reaches the target security.
@@ -32,7 +42,57 @@ pub enum SimulatorError {
     },
 }
 
-fn check_ring_dim(target_secpar: u64, ring_dim: &BigUint, crt_bits: usize, crt_depth: usize) {}
+// #[derive(Debug, Clone, Copy)]
+// enum ParamChange {
+//     Up,
+//     Down,
+// }
+
+fn find_min_ring_dim(
+    target_secpar: u64,
+    crt_bits: u64,
+    crt_depth: u64,
+    base_bits: u64,
+    log_dim_range: (u32, u32),
+) -> Result<(BigUint, u64, u64), SimulatorError> {
+    for log_dim in log_dim_range.0..=log_dim_range.1 {
+        let ring_dim = BigUint::from(2u64).pow(log_dim);
+        match check_security(target_secpar, &ring_dim, crt_bits, crt_depth, base_bits) {
+            Ok((log_alpha, knapsack_len)) => {
+                return Ok((ring_dim, log_alpha, knapsack_len));
+            }
+            Err(_) => {
+                continue;
+            }
+        }
+    }
+    Err(SimulatorError::RingDimNotFound {
+        target_secpar,
+        crt_bits,
+        crt_depth,
+        base_bits,
+        log_dim_range,
+    })
+}
+
+fn check_security(
+    target_secpar: u64,
+    ring_dim: &BigUint,
+    crt_bits: u64,
+    crt_depth: u64,
+    base_bits: u64,
+) -> Result<(u64, u64), SimulatorError> {
+    let log_q = (crt_bits * crt_depth) as u64;
+    let q = BigUint::from(2u64).pow(log_q as u32);
+    let m_g = crt_bits.div_ceil(base_bits) * crt_depth;
+    let m_b = m_g + 2;
+    // The column size of the matrix B (sampled with a trapdoor) is m_b; however, one column is an identity polynomial, so we need to ignore one column.
+    // Additionally, one more uniformly random matrix is used for encrypting a message in ABE; thus the total column size for ring-LWE is m_b - 1 + 1 = m_b.
+    let log_alpha =
+        find_log_alpha_for_ring_lwe(target_secpar, ring_dim, log_q, &BigUint::from(m_b))?;
+    let knapsack_len = find_knapsack_len(target_secpar, ring_dim, &q, m_b - 1)?;
+    Ok((log_alpha, knapsack_len))
+}
 
 /// Returns the smallest `knapsack_len` in [1, max_knapsack_len] whose estimated
 /// security is at least `target_secpar`, or an error if estimation fails or none found.
@@ -44,8 +104,8 @@ fn find_knapsack_len(
     target_secpar: u64,
     ring_dim: &BigUint,
     q: &BigUint,
-    max_knapsack_len: usize,
-) -> Result<usize, SimulatorError> {
+    max_knapsack_len: u64,
+) -> Result<u64, SimulatorError> {
     for knapsack_len in 1..=max_knapsack_len {
         // Effective LWE dimension n = ring_dim * knapsack_len - ring_dim
         let n = ring_dim * BigUint::from(knapsack_len) - ring_dim;
@@ -84,7 +144,7 @@ fn find_log_alpha_for_ring_lwe(
     ring_dim: &BigUint,
     log_q: u64,
     m: &BigUint,
-) -> Result<i64, SimulatorError> {
+) -> Result<u64, SimulatorError> {
     // q = 2^{log_q}
     let q = BigUint::from(1u8) << (log_q as usize);
 
@@ -126,7 +186,8 @@ fn find_log_alpha_for_ring_lwe(
     }
 
     if let Some(ans) = found {
-        Ok(ans)
+        assert!(ans >= 0);
+        Ok(ans as u64)
     } else {
         Err(SimulatorError::LogAlphaNotFound {
             target_secpar,
