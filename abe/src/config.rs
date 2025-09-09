@@ -48,7 +48,6 @@ pub struct Config {
     pub limb_bit_size: usize,
     pub crt_depth: usize,
     pub crt_bits: usize,
-    pub d: usize,
     pub knapsack_size: Option<usize>,
     pub e_b_sigma: f64,
     pub message: u8,

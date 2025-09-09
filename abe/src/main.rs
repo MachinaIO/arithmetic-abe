@@ -81,7 +81,6 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         cfg.crt_bits.div_ceil(cfg.limb_bit_size),
         cfg.crt_depth,
         cfg.num_packed_limbs,
-        cfg.d,
         cfg.knapsack_size,
         cfg.e_b_sigma,
         use_packing,
