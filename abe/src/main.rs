@@ -119,9 +119,9 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
     info!("setup done");
 
     // 2) keygen
-    // let fsk: FuncSK<DCRTPolyMatrix> = abe
-    //     .keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone())
-    //     .await;
+    let fsk: FuncSK<DCRTPolyMatrix> = abe
+        .keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone())
+        .await;
 
     // 3) enc
     assert_eq!(cfg.num_inputs, cfg.input.len());
@@ -133,13 +133,13 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
     );
 
     // 4) dec
-    // let bit: bool = timed_read(
-    //     "dec",
-    //     || abe.dec(params.clone(), ct, mpk.clone(), fsk.clone(), arith.clone()),
-    //     &mut t_dec,
-    // );
+    let bit: bool = timed_read(
+        "dec",
+        || abe.dec(params.clone(), ct, mpk.clone(), fsk.clone(), arith.clone()),
+        &mut t_dec,
+    );
 
-    // info!(target: "abe", dec_result = bit, "decryption finished");
+    info!(target: "abe", dec_result = bit, "decryption finished");
 
     Ok(())
 }
