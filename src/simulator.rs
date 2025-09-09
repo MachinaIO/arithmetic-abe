@@ -1,5 +1,3 @@
-use std::{result, sync::Arc};
-
 use bigdecimal::{BigDecimal, FromPrimitive, One};
 pub use mxx::simulator::lattice_estimator::run_lattice_estimator_cli;
 use mxx::{
@@ -13,7 +11,12 @@ use mxx::{
     },
 };
 use num_bigint::BigUint;
+use rayon::join;
+use rayon::prelude::*;
+use std::sync::Arc;
 use thiserror::Error;
+// Logging (replaces println!)
+// Configure a logger (e.g., env_logger) in the binary/tests to see output.
 
 #[derive(Debug, Error)]
 pub enum SimulatorError {
@@ -55,12 +58,6 @@ pub enum SimulatorError {
     NotCorrect { e: BigDecimal, q_over_4: BigDecimal },
 }
 
-// #[derive(Debug, Clone, Copy)]
-// enum ParamChange {
-//     Up,
-//     Down,
-// }
-
 // Output (crt_depth, base_bits, log_dim, e_b_log_alpha, knapsack_len) or None
 pub fn bruteforce_params(
     target_secpar: u32,
@@ -72,66 +69,75 @@ pub fn bruteforce_params(
     input_size: usize,
 ) -> Option<(u32, u32, u32, i64, u32)> {
     // (cost, crt_depth, base_bits, log_dim, e_b_log_alpha, knapsack_len)
-    let mut outputs = Vec::<(u32, u32, u32, u32, i64, u32)>::new();
-    println!("base_bits_range {:?}", base_bits_range);
-    for base_bits in base_bits_range.0..=base_bits_range.1 {
-        println!("base_bits {base_bits}");
-        let mut lo = crt_depth_range.0;
-        let mut hi = crt_depth_range.1;
-        while lo <= hi {
-            let crt_depth = lo + ((hi - lo) / 2);
-            println!("crt_depth {crt_depth}");
-            let (log_dim, e_b_log_alpha, knapsack_len) = match find_min_ring_dim(
-                target_secpar,
-                crt_bits,
-                crt_depth,
-                base_bits,
-                log_dim_range,
-            ) {
-                Ok(result) => result,
-                Err(e) => {
-                    println!(
-                        "Security error with target_secpar = {target_secpar}, crt_bits = {crt_bits}, base_bits = {base_bits}, crt_depth = {crt_depth}, input_size = {input_size}: {e}"
-                    );
-                    // try smaller crt_depth
-                    hi = crt_depth - 1;
-                    continue;
-                }
-            };
-            match check_correctness(
-                target_secpar,
-                log_dim,
-                crt_bits,
-                crt_depth,
-                base_bits,
-                knapsack_len,
-                e_b_log_alpha,
-                &circuit,
-                input_size,
-            ) {
-                Ok(cost) => {
-                    println!(
-                        "Found with target_secpar = {target_secpar}, crt_bits = {crt_bits}, base_bits = {base_bits}, crt_depth = {crt_depth}, input_size = {input_size}, cost = {cost}"
-                    );
-                    outputs.push((
-                        cost,
+    let circuit = Arc::new(circuit);
+    let outputs: Vec<(u32, u32, u32, u32, i64, u32)> =
+        (base_bits_range.0..=base_bits_range.1)
+            .into_par_iter()
+            .flat_map(|base_bits| {
+                log::debug!("base_bits {}", base_bits);
+                let mut local = Vec::<(u32, u32, u32, u32, i64, u32)>::new();
+                let mut lo = crt_depth_range.0;
+                let mut hi = crt_depth_range.1;
+                while lo <= hi {
+                    let crt_depth = lo + ((hi - lo) / 2);
+                    log::debug!("crt_depth {}", crt_depth);
+                    let (log_dim, e_b_log_alpha, knapsack_len) = match find_min_ring_dim(
+                        target_secpar,
+                        crt_bits,
                         crt_depth,
                         base_bits,
+                        log_dim_range,
+                    ) {
+                        Ok(result) => result,
+                        Err(e) => {
+                            log::debug!(
+                                "Security error with target_secpar = {}, crt_bits = {}, base_bits = {}, crt_depth = {}, input_size = {}: {}",
+                                target_secpar, crt_bits, base_bits, crt_depth, input_size, e
+                            );
+                            // try smaller crt_depth
+                            if crt_depth == 0 { break; }
+                            hi = crt_depth - 1;
+                            continue;
+                        }
+                    };
+                    match check_correctness(
+                        target_secpar,
                         log_dim,
-                        e_b_log_alpha,
+                        crt_bits,
+                        crt_depth,
+                        base_bits,
                         knapsack_len,
-                    ))
+                        e_b_log_alpha,
+                        &*circuit,
+                        input_size,
+                    ) {
+                        Ok(cost) => {
+                            log::info!(
+                                "Found with target_secpar = {}, crt_bits = {}, base_bits = {}, crt_depth = {}, input_size = {}, cost = {}",
+                                target_secpar, crt_bits, base_bits, crt_depth, input_size, cost
+                            );
+                            local.push((
+                                cost,
+                                crt_depth,
+                                base_bits,
+                                log_dim,
+                                e_b_log_alpha,
+                                knapsack_len,
+                            ));
+                        }
+                        Err(e) => {
+                            log::debug!(
+                                "Correctness error with target_secpar = {}, crt_bits = {}, base_bits = {}, crt_depth = {}, input_size = {}: {}",
+                                target_secpar, crt_bits, base_bits, crt_depth, input_size, e
+                            );
+                            // try larger crt_depth
+                            lo = crt_depth + 1;
+                        }
+                    }
                 }
-                Err(e) => {
-                    println!(
-                        "Correctness error with target_secpar = {target_secpar}, crt_bits = {crt_bits}, base_bits = {base_bits}, crt_depth = {crt_depth}, input_size = {input_size}: {e}"
-                    );
-                    // try larger crt_depth
-                    lo = crt_depth + 1;
-                }
-            }
-        }
-    }
+                local
+            })
+            .collect();
     outputs
         .into_iter()
         .min_by(|x, y| x.0.cmp(&y.0))
@@ -146,7 +152,7 @@ fn find_min_ring_dim(
     log_dim_range: (u32, u32),
 ) -> Result<(u32, i64, u32), SimulatorError> {
     for log_dim in log_dim_range.0..=log_dim_range.1 {
-        println!("log_dim {log_dim}");
+        log::debug!("log_dim {}", log_dim);
         let ring_dim = BigUint::from(2u32).pow(log_dim);
         match check_security(target_secpar, &ring_dim, crt_bits, crt_depth, base_bits) {
             Ok((log_alpha, knapsack_len)) => {
@@ -182,9 +188,12 @@ fn check_security(
     let m_b = m_g + 2;
     // The column size of the matrix B (sampled with a trapdoor) is m_b; however, one column is an identity polynomial, so we need to ignore one column.
     // Additionally, one more uniformly random matrix is used for encrypting a message in ABE; thus the total column size for ring-LWE is m_b - 1 + 1 = m_b.
-    let log_alpha =
-        find_log_alpha_for_ring_lwe(target_secpar, ring_dim, log_q, &BigUint::from(m_b))?;
-    let knapsack_len = find_knapsack_len(target_secpar, ring_dim, &q, m_b - 1)?;
+    let (log_alpha_res, knapsack_res) = join(
+        || find_log_alpha_for_ring_lwe(target_secpar, ring_dim, log_q, &BigUint::from(m_b)),
+        || find_knapsack_len(target_secpar, ring_dim, &q, m_b - 1),
+    );
+    let log_alpha = log_alpha_res?;
+    let knapsack_len = knapsack_res?;
     Ok((log_alpha, knapsack_len))
 }
 
@@ -212,6 +221,7 @@ fn find_knapsack_len(
             Some(&n),
             false,
         )?;
+        log::debug!("called estimator {secpar} in find_knapsack_len");
 
         if secpar as u32 >= target_secpar {
             return Ok(knapsack_len);
@@ -268,6 +278,7 @@ fn find_log_alpha_for_ring_lwe(
             Some(m),
             false,
         )?;
+        log::debug!("called estimator {secpar} in find_log_alpha_for_ring_lwe");
 
         if secpar as u32 >= target_secpar {
             found = Some(found.map_or(mid, |cur| cur.min(mid)));
@@ -350,8 +361,13 @@ mod tests {
     use super::*;
     use mxx::{circuit::PolyCircuit, poly::dcrt::poly::DCRTPoly};
 
+    // Initialize logger for test output
+    use env_logger;
+
     #[test]
     fn test_bruteforce_params_with_mul() {
+        // Initialize env_logger once for tests; ignore if already set.
+        let _ = env_logger::builder().is_test(true).try_init();
         let mut circuit = PolyCircuit::<DCRTPoly>::new();
         let ins = circuit.input(2);
         let out_gid = circuit.mul_gate(ins[0], ins[1]);
