@@ -193,7 +193,9 @@ fn check_security(
         || find_knapsack_len(target_secpar, ring_dim, &q, m_b - 1),
     );
     let log_alpha = log_alpha_res?;
+    log::debug!("found log_alpha_res = {log_alpha}");
     let knapsack_len = knapsack_res?;
+    log::debug!("found knapsack_len = {knapsack_len}");
     Ok((log_alpha, knapsack_len))
 }
 
@@ -209,7 +211,7 @@ fn find_knapsack_len(
     q: &BigUint,
     max_knapsack_len: u32,
 ) -> Result<u32, SimulatorError> {
-    for knapsack_len in 1..=max_knapsack_len {
+    for knapsack_len in 2..=max_knapsack_len {
         // Effective LWE dimension n = ring_dim * knapsack_len - ring_dim
         let n = ring_dim * BigUint::from(knapsack_len) - ring_dim;
         // s_dist = Ternary, e_dist = Ternary, m = n, exact = false (rough)
@@ -326,7 +328,7 @@ fn check_correctness(
         base,
         m_g as usize,
     ));
-    let e_b = PolyMatrixNorm::sample_gauss(sim_ctx.clone(), 1, m_b, e_b_sigma);
+    let e_b = PolyMatrixNorm::sample_gauss(sim_ctx.clone(), 1, m_b, e_b_sigma.clone());
     let r_mat = PolyMatrixNorm::new(
         sim_ctx.clone(),
         m_b,
@@ -344,7 +346,13 @@ fn check_correctness(
     let (max_h_top, max_h_bottom) = max_out_wire.h_norm.split_rows(m_b);
     let e_after_eval = &e_b * max_h_top + e_a * max_h_bottom;
     let plt_eval = NormPltLweEvaluator::new(sim_ctx.clone(), input_size);
-    let e_final = &e_b * plt_eval.preimage1_norm + e_after_eval * plt_eval.preimage2_norm + e_b;
+    let mut preimage_norm_top = plt_eval.preimage1_norm.clone();
+    preimage_norm_top.nrow = m_b;
+    preimage_norm_top.ncol = 1;
+    let mut preimage_norm_bottom = plt_eval.preimage2_norm.clone();
+    preimage_norm_bottom.ncol = 1;
+    let e_u = PolyMatrixNorm::sample_gauss(sim_ctx.clone(), 1, 1, e_b_sigma);
+    let e_final = &e_b * preimage_norm_top + e_after_eval * preimage_norm_bottom + e_u;
     let q_over_4 = BigDecimal::from_biguint(q, 0) / 4;
     if q_over_4 > e_final.poly_norm.norm {
         Ok(log_dim * m_g as u32)
@@ -373,7 +381,7 @@ mod tests {
         let out_gid = circuit.mul_gate(ins[0], ins[1]);
         circuit.output(vec![out_gid]);
 
-        let params = bruteforce_params(100, 17, (3, 5), (16, 18), (13, 20), circuit, 2);
+        let params = bruteforce_params(100, 41, (5, 10), (16, 18), (13, 16), circuit, 2);
         assert!(params.is_some());
         println!("params: {:?}", params);
     }
