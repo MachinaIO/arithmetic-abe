@@ -80,7 +80,6 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         cfg.limb_bit_size,
         cfg.crt_bits.div_ceil(cfg.limb_bit_size),
         cfg.crt_depth,
-        cfg.num_packed_limbs,
         cfg.knapsack_size,
         cfg.e_b_sigma,
         use_packing,
@@ -106,13 +105,15 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
     let final_idx = arith.sub(mul_idx, ArithGateId::new(0)); // (a + b) * c - a
     arith.output(final_idx);
 
+    let num_inputs = cfg.input.len();
+
     // 1) setup
     let (mpk, msk): (
         MasterPK<DCRTPolyMatrix>,
         MasterSK<DCRTPolyMatrix, DCRTPolyTrapdoorSampler>,
     ) = timed_read(
         "setup",
-        || abe.setup(params.clone(), cfg.num_inputs, cfg.num_packed_limbs),
+        || abe.setup(params.clone(), num_inputs),
         &mut t_setup,
     );
     info!("setup done");
@@ -123,7 +124,6 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         .await;
 
     // 3) enc
-    assert_eq!(cfg.num_inputs, cfg.input.len());
     let msg_bit = cfg.message != 0;
     let ct: Ciphertext<DCRTPolyMatrix> = timed_read(
         "enc",

@@ -43,20 +43,12 @@ fn default_trapdoor_sigma() -> f64 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    pub num_inputs: usize,
-    pub num_packed_limbs: usize,
     pub limb_bit_size: usize,
     pub crt_depth: usize,
     pub crt_bits: usize,
     pub knapsack_size: Option<usize>,
     pub e_b_sigma: f64,
     pub message: u8,
-    pub circuit_path: Option<String>,
-    #[serde(
-        serialize_with = "biguint_to_string",
-        deserialize_with = "biguint_from_string"
-    )]
-    pub switched_modulus: BigUint,
     #[serde(default = "default_trapdoor_sigma")]
     pub trapdoor_sigma: f64,
     /// polynomial ring dimension

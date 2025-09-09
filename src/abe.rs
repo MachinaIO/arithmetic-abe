@@ -32,7 +32,6 @@ pub struct KeyPolicyABE<
     pub limb_bit_size: usize,
     pub num_crt_limbs: usize,
     pub crt_depth: usize,
-    pub num_packed_limbs: usize,
     pub knapsack_size: Option<usize>,
     pub use_packing: bool,
     pub trapdoor_sampler: ST,
@@ -51,7 +50,6 @@ impl<
         limb_bit_size: usize,
         num_crt_limbs: usize,
         crt_depth: usize,
-        num_packed_limbs: usize,
         knapsack_size: Option<usize>,
         e_b_sigma: f64,
         use_packing: bool,
@@ -61,7 +59,6 @@ impl<
             limb_bit_size,
             num_crt_limbs,
             crt_depth,
-            num_packed_limbs,
             knapsack_size,
             e_b_sigma,
             use_packing,
@@ -75,7 +72,6 @@ impl<
         &self,
         params: <M::P as Poly>::Params,
         num_inputs: usize,
-        packed_limbs: usize,
     ) -> (MasterPK<M>, MasterSK<M, ST>) {
         let seed: [u8; 32] = rand::random();
         let (b_trapdoor, b_matrix) = self.trapdoor_sampler.trapdoor(&params, 1);
@@ -83,7 +79,7 @@ impl<
         let b_matrix = Arc::new(b_matrix);
         let uniform_sampler = SU::new();
         let u = uniform_sampler.sample_uniform(&params, 1, 1, DistType::FinRingDist);
-        let mpk = MasterPK::new(num_inputs, packed_limbs, seed, b_matrix, u);
+        let mpk = MasterPK::new(num_inputs, seed, b_matrix, u);
         let msk = MasterSK::new(b_trapdoor);
         (mpk, msk)
     }
