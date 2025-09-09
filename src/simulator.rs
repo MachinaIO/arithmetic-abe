@@ -14,7 +14,6 @@ use mxx::{
 };
 use num_bigint::BigUint;
 use thiserror::Error;
-use tracing::info;
 
 #[derive(Debug, Error)]
 pub enum SimulatorError {
@@ -74,11 +73,14 @@ pub fn bruteforce_params(
 ) -> Option<(u32, u32, u32, i64, u32)> {
     // (cost, crt_depth, base_bits, log_dim, e_b_log_alpha, knapsack_len)
     let mut outputs = Vec::<(u32, u32, u32, u32, i64, u32)>::new();
+    println!("base_bits_range {:?}", base_bits_range);
     for base_bits in base_bits_range.0..=base_bits_range.1 {
+        println!("base_bits {base_bits}");
         let mut lo = crt_depth_range.0;
         let mut hi = crt_depth_range.1;
         while lo <= hi {
             let crt_depth = lo + ((hi - lo) / 2);
+            println!("crt_depth {crt_depth}");
             let (log_dim, e_b_log_alpha, knapsack_len) = match find_min_ring_dim(
                 target_secpar,
                 crt_bits,
@@ -88,7 +90,7 @@ pub fn bruteforce_params(
             ) {
                 Ok(result) => result,
                 Err(e) => {
-                    info!(
+                    println!(
                         "Security error with target_secpar = {target_secpar}, crt_bits = {crt_bits}, base_bits = {base_bits}, crt_depth = {crt_depth}, input_size = {input_size}: {e}"
                     );
                     // try smaller crt_depth
@@ -108,7 +110,7 @@ pub fn bruteforce_params(
                 input_size,
             ) {
                 Ok(cost) => {
-                    info!(
+                    println!(
                         "Found with target_secpar = {target_secpar}, crt_bits = {crt_bits}, base_bits = {base_bits}, crt_depth = {crt_depth}, input_size = {input_size}, cost = {cost}"
                     );
                     outputs.push((
@@ -121,7 +123,7 @@ pub fn bruteforce_params(
                     ))
                 }
                 Err(e) => {
-                    info!(
+                    println!(
                         "Correctness error with target_secpar = {target_secpar}, crt_bits = {crt_bits}, base_bits = {base_bits}, crt_depth = {crt_depth}, input_size = {input_size}: {e}"
                     );
                     // try larger crt_depth
@@ -144,12 +146,16 @@ fn find_min_ring_dim(
     log_dim_range: (u32, u32),
 ) -> Result<(u32, i64, u32), SimulatorError> {
     for log_dim in log_dim_range.0..=log_dim_range.1 {
+        println!("log_dim {log_dim}");
         let ring_dim = BigUint::from(2u32).pow(log_dim);
         match check_security(target_secpar, &ring_dim, crt_bits, crt_depth, base_bits) {
             Ok((log_alpha, knapsack_len)) => {
                 return Ok((log_dim, log_alpha, knapsack_len));
             }
-            Err(_) => {
+            Err(e) => {
+                if let SimulatorError::Estimator(_) = e {
+                    return Err(e);
+                }
                 continue;
             }
         }
@@ -351,7 +357,7 @@ mod tests {
         let out_gid = circuit.mul_gate(ins[0], ins[1]);
         circuit.output(vec![out_gid]);
 
-        let params = bruteforce_params(100, 41, (5, 10), (16, 18), (13, 16), circuit, 2);
+        let params = bruteforce_params(100, 17, (3, 5), (16, 18), (13, 20), circuit, 2);
         assert!(params.is_some());
         println!("params: {:?}", params);
     }
