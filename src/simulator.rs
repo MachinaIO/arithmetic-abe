@@ -151,21 +151,38 @@ fn find_min_ring_dim(
     base_bits: u32,
     log_dim_range: (u32, u32),
 ) -> Result<(u32, i64, u32), SimulatorError> {
-    for log_dim in log_dim_range.0..=log_dim_range.1 {
-        log::debug!("log_dim {}", log_dim);
-        let ring_dim = BigUint::from(2u32).pow(log_dim);
-        match check_security(target_secpar, &ring_dim, crt_bits, crt_depth, base_bits) {
-            Ok((log_alpha, knapsack_len)) => {
-                return Ok((log_dim, log_alpha, knapsack_len));
-            }
-            Err(e) => {
-                if let SimulatorError::Estimator(_) = e {
-                    return Err(e);
+    // Evaluate all candidate log_dim in parallel, then select the minimal feasible one.
+    let results: Vec<Result<(u32, i64, u32), SimulatorError>> =
+        (log_dim_range.0..=log_dim_range.1)
+            .into_par_iter()
+            .map(|log_dim| {
+                log::debug!("log_dim {}", log_dim);
+                let ring_dim = BigUint::from(2u32).pow(log_dim);
+                match check_security(target_secpar, &ring_dim, crt_bits, crt_depth, base_bits) {
+                    Ok((log_alpha, knapsack_len)) => Ok((log_dim, log_alpha, knapsack_len)),
+                    Err(e) => Err(e),
                 }
-                continue;
-            }
-        }
+            })
+            .collect();
+
+    // Pick the smallest log_dim among successes
+    if let Some((log_dim, log_alpha, knapsack_len)) = results
+        .iter()
+        .filter_map(|r| r.as_ref().ok())
+        .min_by(|a, b| a.0.cmp(&b.0))
+        .copied()
+    {
+        return Ok((log_dim, log_alpha, knapsack_len));
     }
+
+    // If there were no successes, propagate any Estimator error if present
+    if let Some(estimator_err) = results.into_iter().find_map(|r| match r {
+        Err(SimulatorError::Estimator(e)) => Some(SimulatorError::Estimator(e)),
+        _ => None,
+    }) {
+        return Err(estimator_err);
+    }
+
     Err(SimulatorError::RingDimNotFound {
         target_secpar,
         crt_bits,
