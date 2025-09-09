@@ -103,10 +103,12 @@ checksum = "b0674a1ddeecb70197781e945de4b3b8ffb61fa939a5597bcf48503737663100"
 name = "arithmetic-abe"
 version = "0.1.0"
 dependencies = [
+ "bigdecimal",
  "mxx",
  "num-bigint",
  "rand 0.9.2",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -300,11 +302,12 @@ dependencies = [
 
 [[package]]
 name = "cxx"
-version = "1.0.180"
+version = "1.0.181"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ecd70e33fb57b5fec1608d572bf8dc382f5385a19529056b32307a29ac329be"
+checksum = "96f024c2cec8ca95ed513691806a571cec24ed8e587e476c16937ee5ea7669fa"
 dependencies = [
  "cc",
+ "cxx-build",
  "cxxbridge-cmd",
  "cxxbridge-flags",
  "cxxbridge-macro",
@@ -314,9 +317,9 @@ dependencies = [
 
 [[package]]
 name = "cxx-build"
-version = "1.0.180"
+version = "1.0.181"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf3259fec4a8c685a8f1bd4248ae03b5500027dc0c220acfa7123b00613400a4"
+checksum = "e48d81746fe56e136ecca3ebb309b43949d737a4c34473d299a0d1fd20bdfc16"
 dependencies = [
  "cc",
  "codespan-reporting",
@@ -329,9 +332,9 @@ dependencies = [
 
 [[package]]
 name = "cxxbridge-cmd"
-version = "1.0.180"
+version = "1.0.181"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64320fd0856fdf2421f8404b67d41e91291cbcfa3d57457b390f0a2618ee9a68"
+checksum = "918dd6fc44651b2535c21ecacb24627a49195d7d1651bd708bd0862b60c40e3f"
 dependencies = [
  "clap",
  "codespan-reporting",
@@ -343,15 +346,15 @@ dependencies = [
 
 [[package]]
 name = "cxxbridge-flags"
-version = "1.0.180"
+version = "1.0.181"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77e40964f209961217b972415a8e3a0c23299076a0b2dfe79fa8366b5e5c833e"
+checksum = "4b0d2ef4f6937db5bfcab83c19552395aad21a27a0abf21e352da997c0670b80"
 
 [[package]]
 name = "cxxbridge-macro"
-version = "1.0.180"
+version = "1.0.181"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51afdec15d8072d1b69f54f645edaf54250088a7e54c4fe493016781278136bd"
+checksum = "8859ec3fd1d06623e82b84b4cd6fa401e604d70841b1a6bfaa74598c353e81d4"
 dependencies = [
  "indexmap",
  "proc-macro2",
@@ -625,7 +628,7 @@ dependencies = [
 [[package]]
 name = "mxx"
 version = "0.1.0"
-source = "git+https://github.com/MachinaIO/mxx.git?branch=feat%2Fupdate_simulator_0909#c821229b0a3099f8fa42b622c710933de0216e70"
+source = "git+https://github.com/MachinaIO/mxx.git?branch=feat%2Fupdate_simulator_0909#69965f440e742a0cd019ec69223f496a4365b2ce"
 dependencies = [
  "bigdecimal",
  "bincode",
