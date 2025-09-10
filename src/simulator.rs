@@ -1,4 +1,4 @@
-use bigdecimal::{BigDecimal, FromPrimitive, One};
+use bigdecimal::{BigDecimal, FromPrimitive, One, Pow};
 pub use mxx::simulator::lattice_estimator::run_lattice_estimator_cli;
 use mxx::{
     circuit::PolyCircuit,
@@ -58,7 +58,7 @@ pub enum SimulatorError {
     NotCorrect { e: BigDecimal, q_over_4: BigDecimal },
 }
 
-// Output (crt_depth, base_bits, log_dim, e_b_log_alpha, knapsack_len) or None
+// Output (crt_depth, base_bits, log_dim, e_b_sigma, knapsack_len) or None
 pub fn bruteforce_params(
     target_secpar: u32,
     crt_bits: u32,
@@ -67,14 +67,14 @@ pub fn bruteforce_params(
     log_dim_range: (u32, u32),
     circuit: PolyCircuit<DCRTPoly>,
     input_size: usize,
-) -> Option<(u32, u32, u32, i64, u32)> {
-    // (cost, crt_depth, base_bits, log_dim, e_b_log_alpha, knapsack_len)
+) -> Option<(u32, u32, u32, f64, u32)> {
+    // (cost, crt_depth, base_bits, log_dim, e_b_sigma, knapsack_len)
     let circuit = Arc::new(circuit);
-    let outputs: Vec<(u32, u32, u32, u32, i64, u32)> =
+    let outputs: Vec<(u32, u32, u32, u32, f64, u32)> =
         (base_bits_range.0..=base_bits_range.1)
             .into_par_iter()
             .flat_map(|base_bits| {
-                let mut local = Vec::<(u32, u32, u32, u32, i64, u32)>::new();
+                let mut local = Vec::<(u32, u32, u32, u32, f64, u32)>::new();
                 let mut lo = crt_depth_range.0;
                 let mut hi = crt_depth_range.1;
                 while lo <= hi {
@@ -120,7 +120,7 @@ pub fn bruteforce_params(
                                 crt_depth,
                                 base_bits,
                                 log_dim,
-                                e_b_log_alpha,
+                                2.0f64.pow(crt_bits as f64 * crt_depth as f64 + e_b_log_alpha as f64),
                                 knapsack_len,
                             ));
                             // search smaller crt_depth to continue binary search
@@ -399,7 +399,7 @@ mod tests {
         let out_gid = circuit.mul_gate(ins[0], ins[1]);
         circuit.output(vec![out_gid]);
 
-        let params = bruteforce_params(100, 41, (5, 8), (16, 18), (13, 16), circuit, 2);
+        let params = bruteforce_params(100, 41, (2, 4), (15, 18), (13, 16), circuit, 2);
         assert!(params.is_some());
         println!("params: {:?}", params);
     }
