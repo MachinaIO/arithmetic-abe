@@ -74,13 +74,12 @@ pub fn bruteforce_params(
         (base_bits_range.0..=base_bits_range.1)
             .into_par_iter()
             .flat_map(|base_bits| {
-                log::debug!("base_bits {}", base_bits);
                 let mut local = Vec::<(u32, u32, u32, u32, i64, u32)>::new();
                 let mut lo = crt_depth_range.0;
                 let mut hi = crt_depth_range.1;
                 while lo <= hi {
                     let crt_depth = lo + ((hi - lo) / 2);
-                    log::debug!("crt_depth {}", crt_depth);
+                    log::debug!("base_bits {base_bits} crt_depth {crt_depth}");
                     let (log_dim, e_b_log_alpha, knapsack_len) = match find_min_ring_dim(
                         target_secpar,
                         crt_bits,
@@ -124,6 +123,9 @@ pub fn bruteforce_params(
                                 e_b_log_alpha,
                                 knapsack_len,
                             ));
+                            // search smaller crt_depth to continue binary search
+                            if crt_depth == 0 { break; }
+                            hi = crt_depth - 1;
                         }
                         Err(e) => {
                             log::debug!(
@@ -152,18 +154,17 @@ fn find_min_ring_dim(
     log_dim_range: (u32, u32),
 ) -> Result<(u32, i64, u32), SimulatorError> {
     // Evaluate all candidate log_dim in parallel, then select the minimal feasible one.
-    let results: Vec<Result<(u32, i64, u32), SimulatorError>> =
-        (log_dim_range.0..=log_dim_range.1)
-            .into_par_iter()
-            .map(|log_dim| {
-                log::debug!("log_dim {}", log_dim);
-                let ring_dim = BigUint::from(2u32).pow(log_dim);
-                match check_security(target_secpar, &ring_dim, crt_bits, crt_depth, base_bits) {
-                    Ok((log_alpha, knapsack_len)) => Ok((log_dim, log_alpha, knapsack_len)),
-                    Err(e) => Err(e),
-                }
-            })
-            .collect();
+    let results: Vec<Result<(u32, i64, u32), SimulatorError>> = (log_dim_range.0..=log_dim_range.1)
+        .into_par_iter()
+        .map(|log_dim| {
+            log::debug!("log_dim {}", log_dim);
+            let ring_dim = BigUint::from(2u32).pow(log_dim);
+            match check_security(target_secpar, &ring_dim, crt_bits, crt_depth, base_bits) {
+                Ok((log_alpha, knapsack_len)) => Ok((log_dim, log_alpha, knapsack_len)),
+                Err(e) => Err(e),
+            }
+        })
+        .collect();
 
     // Pick the smallest log_dim among successes
     if let Some((log_dim, log_alpha, knapsack_len)) = results
@@ -398,7 +399,7 @@ mod tests {
         let out_gid = circuit.mul_gate(ins[0], ins[1]);
         circuit.output(vec![out_gid]);
 
-        let params = bruteforce_params(100, 41, (5, 10), (16, 18), (13, 16), circuit, 2);
+        let params = bruteforce_params(100, 41, (5, 8), (16, 18), (13, 16), circuit, 2);
         assert!(params.is_some());
         println!("params: {:?}", params);
     }
