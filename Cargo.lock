@@ -10,7 +10,7 @@ dependencies = [
  "arithmetic-abe",
  "clap",
  "keccak-asm",
- "mxx 0.1.0 (git+https://github.com/MachinaIO/mxx.git?branch=feat%2Fupdate_simulator_0909)",
+ "mxx",
  "num-bigint",
  "serde",
  "tokio",
@@ -106,7 +106,7 @@ dependencies = [
  "bigdecimal",
  "env_logger",
  "log",
- "mxx 0.1.0 (git+https://github.com/MachinaIO/mxx.git)",
+ "mxx",
  "num-bigint",
  "rand 0.9.2",
  "rayon",
@@ -677,7 +677,7 @@ dependencies = [
 [[package]]
 name = "mxx"
 version = "0.1.0"
-source = "git+https://github.com/MachinaIO/mxx.git?branch=feat%2Fupdate_simulator_0909#2fe41c4b42d88073336f3881fe261c24b78e1fae"
+source = "git+https://github.com/MachinaIO/mxx.git#203bc2d4be76b03715d031a6b663db1be72b1694"
 dependencies = [
  "bigdecimal",
  "bincode",
@@ -696,31 +696,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "mxx"
-version = "0.1.0"
-source = "git+https://github.com/MachinaIO/mxx.git#56b74663776b192813f46c5c0c25b456af3d2618"
-dependencies = [
- "bincode",
- "bitvec",
- "dashmap",
- "digest",
- "itertools",
- "keccak-asm",
- "memory-stats",
- "num-bigint",
- "num-traits",
- "openfhe",
- "rand 0.9.2",
- "rayon",
- "serde",
- "serde_json",
- "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

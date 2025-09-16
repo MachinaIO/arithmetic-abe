@@ -3,19 +3,19 @@ use crate::{
     keys::FuncSK,
     keys::{MasterPK, MasterSK},
 };
+use mxx::bgg::encoding::BggEncoding;
 use mxx::element::PolyElem;
-use mxx::{
-    arithmetic::circuit::ArithmeticCircuit,
-    gadgets::{crt::num_limbs_of_crt_poly, packed_crt::num_packed_crt_poly},
-};
-use mxx::{bgg::encoding::BggEncoding, gadgets::packed_crt::biguints_to_packed_crt_polys};
+use mxx::{arithmetic::circuit::ArithmeticCircuit, gadgets::crt::num_limbs_of_crt_poly};
 use mxx::{
     bgg::sampler::{BGGEncodingSampler, BGGPublicKeySampler},
     matrix::PolyMatrix,
     poly::{Poly, PolyParams},
     sampler::{DistType, PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler},
 };
-use mxx::{gadgets::crt::biguint_to_crt_poly, lookup::lwe_eval::LweBggEncodingPltEvaluator};
+use mxx::{
+    gadgets::crt::{biguint_vec_to_crt_poly, biguint_vec_to_packed_crt_poly},
+    lookup::lwe_eval::LweBggEncodingPltEvaluator,
+};
 use num_bigint::BigUint;
 use std::sync::Arc;
 use std::{marker::PhantomData, path::PathBuf};
@@ -88,8 +88,8 @@ impl<
         &self,
         params: <M::P as Poly>::Params,
         mpk: MasterPK<M>,
-        inputs: &[BigUint],
-        message: bool,
+        inputs: &[Vec<BigUint>],
+        message: &[bool],
     ) -> Ciphertext<M> {
         let num_inputs = inputs.len();
         let uniform_sampler = SU::new();
@@ -119,12 +119,17 @@ impl<
         let c_b = s.clone() * mpk.b_matrix.as_ref() + c_b_error.clone();
         let bgg_encoding_sampler = BGGEncodingSampler::<SU>::new(&params, &s.get_row(0), None);
         let plaintexts = if self.use_packing {
-            biguints_to_packed_crt_polys(self.limb_bit_size, &params, inputs)
+            inputs
+                .iter()
+                .flat_map(|input| {
+                    biguint_vec_to_packed_crt_poly(self.limb_bit_size, &params, input)
+                })
+                .collect::<Vec<_>>()
         } else {
             inputs
-                .into_iter()
-                .flat_map(|input| biguint_to_crt_poly(self.limb_bit_size, &params, input))
-                .collect()
+                .iter()
+                .flat_map(|input| biguint_vec_to_crt_poly(self.limb_bit_size, &params, input))
+                .collect::<Vec<_>>()
         };
         let num_given_input_polys = if self.use_packing {
             num_packed_crt_poly::<M::P>(self.limb_bit_size, &params, num_inputs)
@@ -169,11 +174,20 @@ impl<
                 }
             })
             .collect::<Vec<_>>();
-        let scale = M::P::from_elem_to_constant(
-            &params,
-            &(<M::P as Poly>::Elem::half_q(&params.modulus())
-                * <M::P as Poly>::Elem::new(message, params.modulus())),
+        let ring_dim = params.ring_dimension() as usize;
+        assert_eq!(
+            message.len(),
+            ring_dim,
+            "message length must match ring dimension",
         );
+        let message_coeffs: Vec<BigUint> = message
+            .iter()
+            .map(|bit| BigUint::from(*bit as u8))
+            .collect();
+        let message_poly = M::P::from_biguints(&params, &message_coeffs);
+        let half_q = <M::P as Poly>::Elem::half_q(&params.modulus());
+        let half_const = M::P::from_elem_to_constant(&params, &half_q);
+        let scaled_message = message_poly * half_const;
         let e_u = uniform_sampler.sample_uniform(
             &params,
             1,
@@ -182,7 +196,7 @@ impl<
                 sigma: self.e_b_sigma,
             },
         );
-        let c_u = (s.clone() * mpk.u.clone() + e_u).get_row(0)[0].clone() + scale;
+        let c_u = (s.clone() * mpk.u.clone() + e_u).get_row(0)[0].clone() + scaled_message;
 
         Ciphertext {
             bgg_encodings,
@@ -246,4 +260,14 @@ impl<
         let z = ct.c_u - v.get_row(0)[0].clone();
         z.extract_bits_with_threshold(&params)[0]
     }
+}
+
+fn num_packed_crt_poly<P: Poly>(
+    limb_bit_size: usize,
+    params: &P::Params,
+    num_inputs: usize,
+) -> usize {
+    let (_, crt_bits, _) = params.to_crt();
+    let num_limbs_per_slot = crt_bits.div_ceil(limb_bit_size);
+    num_inputs * num_limbs_per_slot
 }

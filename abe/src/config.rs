@@ -3,37 +3,30 @@ use std::str::FromStr;
 use num_bigint::BigUint;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-fn biguint_to_string<S>(value: &BigUint, serializer: S) -> Result<S::Ok, S::Error>
+fn matrix_biguint_to_string<S>(values: &Vec<Vec<BigUint>>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    serializer.serialize_str(&value.to_str_radix(10))
-}
-
-fn biguint_from_string<'de, D>(deserializer: D) -> Result<BigUint, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    BigUint::from_str(&s).map_err(de::Error::custom)
-}
-
-fn vec_biguint_to_string<S>(values: &Vec<BigUint>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    let strings: Vec<String> = values.iter().map(|v| v.to_str_radix(10)).collect();
+    let strings: Vec<Vec<String>> = values
+        .iter()
+        .map(|row| row.iter().map(|v| v.to_str_radix(10)).collect())
+        .collect();
     strings.serialize(serializer)
 }
 
-fn vec_biguint_from_string<'de, D>(deserializer: D) -> Result<Vec<BigUint>, D::Error>
+fn matrix_biguint_from_string<'de, D>(deserializer: D) -> Result<Vec<Vec<BigUint>>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let strings: Vec<String> = Vec::deserialize(deserializer)?;
+    let strings: Vec<Vec<String>> = Vec::deserialize(deserializer)?;
     strings
         .into_iter()
-        .map(|s| BigUint::from_str(&s).map_err(de::Error::custom))
+        .map(|row| {
+            row
+                .into_iter()
+                .map(|s| BigUint::from_str(&s).map_err(de::Error::custom))
+                .collect()
+        })
         .collect()
 }
 
@@ -48,7 +41,7 @@ pub struct Config {
     pub crt_bits: usize,
     pub knapsack_size: Option<usize>,
     pub e_b_sigma: f64,
-    pub message: u8,
+    pub message: Vec<bool>,
     #[serde(default = "default_trapdoor_sigma")]
     pub trapdoor_sigma: f64,
     /// polynomial ring dimension
@@ -56,8 +49,8 @@ pub struct Config {
     /// bit size of the base for the gadget vector and decomposition
     pub base_bits: u32,
     #[serde(
-        serialize_with = "vec_biguint_to_string",
-        deserialize_with = "vec_biguint_from_string"
+        serialize_with = "matrix_biguint_to_string",
+        deserialize_with = "matrix_biguint_from_string"
     )]
-    pub input: Vec<BigUint>,
+    pub input: Vec<Vec<BigUint>>,
 }
