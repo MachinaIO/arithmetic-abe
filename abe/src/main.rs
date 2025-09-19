@@ -83,8 +83,7 @@ async fn run_env_configured(config: PathBuf, height: usize, data_dir: PathBuf) -
         cfg.limb_bit_size,
         cfg.crt_bits.div_ceil(cfg.limb_bit_size),
         cfg.crt_depth,
-        cfg.num_packed_limbs,
-        cfg.d,
+        cfg.knapsack_size,
         cfg.e_b_sigma,
         use_packing,
         trapdoor_sampler,
@@ -97,10 +96,12 @@ async fn run_env_configured(config: PathBuf, height: usize, data_dir: PathBuf) -
 
     info!(target: "abe",  "starting KeyPolicy ABE");
 
+    let num_inputs = cfg.input.len();
     let mut arith = ArithmeticCircuit::<DCRTPoly>::setup(
         &params,
         cfg.limb_bit_size,
-        cfg.input.len(),
+        cfg.ring_dimension as usize,
+        num_inputs,
         use_packing,
         true,
     );
@@ -111,6 +112,7 @@ async fn run_env_configured(config: PathBuf, height: usize, data_dir: PathBuf) -
         num_leaves * 2,
         height
     );
+    info!("setup done");
 
     let mut current_layer = Vec::new();
     for i in 0..num_leaves {
@@ -137,11 +139,7 @@ async fn run_env_configured(config: PathBuf, height: usize, data_dir: PathBuf) -
 
     // 1) setup
     let (mpk, msk): (MasterPK<DCRTPolyMatrix>, MasterSK<DCRTPolyMatrix, DCRTPolyTrapdoorSampler>) =
-        timed_read(
-            "setup",
-            || abe.setup(params.clone(), cfg.num_inputs, cfg.num_packed_limbs),
-            &mut t_setup,
-        );
+        timed_read("setup", || abe.setup(params.clone(), num_inputs), &mut t_setup);
 
     let dir_path = if data_dir.exists() {
         data_dir
@@ -157,14 +155,11 @@ async fn run_env_configured(config: PathBuf, height: usize, data_dir: PathBuf) -
         abe.keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone(), dir_path).await;
 
     // 3) enc
-    assert_eq!(cfg.num_inputs, cfg.input.len());
     let ct: Ciphertext<DCRTPolyMatrix> = timed_read(
         "enc",
-        || abe.enc(params.clone(), mpk.clone(), &cfg.input, cfg.message),
+        || abe.enc(params.clone(), mpk.clone(), &cfg.input, &cfg.message),
         &mut t_enc,
     );
-
-    info!(target: "abe", expected_result = cfg.message, "finished encryption");
 
     // 4) dec
     let bit: bool = timed_read(
