@@ -93,10 +93,12 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
 
     info!(target: "abe",  "starting KeyPolicy ABE");
 
+    let num_inputs = cfg.input.len();
     let mut arith = ArithmeticCircuit::<DCRTPoly>::setup(
         &params,
         cfg.limb_bit_size,
-        cfg.input.len(),
+        cfg.ring_dimension as usize,
+        num_inputs,
         use_packing,
         true,
     );
@@ -104,8 +106,6 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
     let mul_idx = arith.mul(add_idx, ArithGateId::new(2)); // (a + b) * c
     let final_idx = arith.sub(mul_idx, ArithGateId::new(0)); // (a + b) * c - a
     arith.output(final_idx);
-
-    let num_inputs = cfg.input.len();
 
     // 1) setup
     let (mpk, msk): (
@@ -124,10 +124,9 @@ async fn run_env_configured(config: PathBuf) -> Result<()> {
         .await;
 
     // 3) enc
-    let msg_bit = cfg.message != 0;
     let ct: Ciphertext<DCRTPolyMatrix> = timed_read(
         "enc",
-        || abe.enc(params.clone(), mpk.clone(), &cfg.input, msg_bit),
+        || abe.enc(params.clone(), mpk.clone(), &cfg.input, &cfg.message),
         &mut t_enc,
     );
 
