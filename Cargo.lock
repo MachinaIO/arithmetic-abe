@@ -677,7 +677,7 @@ dependencies = [
 [[package]]
 name = "mxx"
 version = "0.1.0"
-source = "git+https://github.com/MachinaIO/mxx.git#203bc2d4be76b03715d031a6b663db1be72b1694"
+source = "git+https://github.com/MachinaIO/mxx.git?branch=batch%2Ffix%2Fabe#703b755d9b6eca5985221c7958aa0e0b5f70c4fb"
 dependencies = [
  "bigdecimal",
  "bincode",
