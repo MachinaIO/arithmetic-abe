@@ -1,7 +1,5 @@
-use mxx::matrix::PolyMatrix;
-use mxx::sampler::PolyTrapdoorSampler;
-use std::path::PathBuf;
-use std::sync::Arc;
+use mxx::{matrix::PolyMatrix, sampler::PolyTrapdoorSampler};
+use std::{path::PathBuf, sync::Arc};
 
 #[derive(Clone)]
 pub struct FuncSK<M: PolyMatrix> {
@@ -20,12 +18,7 @@ pub struct MasterPK<M: PolyMatrix> {
 
 impl<M: PolyMatrix> MasterPK<M> {
     pub fn new(num_inputs: usize, seed: [u8; 32], b_matrix: Arc<M>, u: M) -> Self {
-        Self {
-            num_inputs,
-            seed,
-            b_matrix,
-            u,
-        }
+        Self { num_inputs, seed, b_matrix, u }
     }
 }
 

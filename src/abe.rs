@@ -1,24 +1,24 @@
 use crate::{
     ciphertext::Ciphertext,
-    keys::FuncSK,
-    keys::{MasterPK, MasterSK},
+    keys::{FuncSK, MasterPK, MasterSK},
 };
-use mxx::bgg::encoding::BggEncoding;
-use mxx::element::PolyElem;
-use mxx::{arithmetic::circuit::ArithmeticCircuit, gadgets::crt::num_limbs_of_crt_poly};
 use mxx::{
-    bgg::sampler::{BGGEncodingSampler, BGGPublicKeySampler},
+    arithmetic::circuit::ArithmeticCircuit,
+    bgg::{
+        encoding::BggEncoding,
+        sampler::{BGGEncodingSampler, BGGPublicKeySampler},
+    },
+    element::PolyElem,
+    gadgets::crt::{
+        biguint_vec_to_crt_poly, biguint_vec_to_packed_crt_poly, num_limbs_of_crt_poly,
+    },
+    lookup::lwe_eval::LweBggEncodingPltEvaluator,
     matrix::PolyMatrix,
     poly::{Poly, PolyParams},
     sampler::{DistType, PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler},
 };
-use mxx::{
-    gadgets::crt::{biguint_vec_to_crt_poly, biguint_vec_to_packed_crt_poly},
-    lookup::lwe_eval::LweBggEncodingPltEvaluator,
-};
 use num_bigint::BigUint;
-use std::sync::Arc;
-use std::{marker::PhantomData, path::PathBuf};
+use std::{marker::PhantomData, path::PathBuf, sync::Arc};
 
 const TAG_BGG_PUBKEY: &[u8] = b"BGG_PUBKEY";
 
@@ -100,9 +100,7 @@ impl<
                 &params,
                 1,
                 1,
-                DistType::GaussDist {
-                    sigma: self.e_b_sigma,
-                },
+                DistType::GaussDist { sigma: self.e_b_sigma },
             );
             let minus_one = M::P::const_minus_one(&params);
             let second_part = s.clone() * minus_one;
@@ -110,13 +108,11 @@ impl<
                 &params,
                 1,
                 b_col_size - 2,
-                DistType::GaussDist {
-                    sigma: self.e_b_sigma,
-                },
+                DistType::GaussDist { sigma: self.e_b_sigma },
             );
             first_part.concat_columns(&[&second_part, &third_part])
         };
-        let c_b = s.clone() * mpk.b_matrix.as_ref() + c_b_error.clone();
+        let c_b = s.clone() * mpk.b_matrix.as_ref() + &c_b_error;
         let bgg_encoding_sampler = BGGEncodingSampler::<SU>::new(&params, &s.get_row(0), None);
         let plaintexts = if self.use_packing {
             inputs
@@ -175,15 +171,9 @@ impl<
             })
             .collect::<Vec<_>>();
         let ring_dim = params.ring_dimension() as usize;
-        assert_eq!(
-            message.len(),
-            ring_dim,
-            "message length must match ring dimension",
-        );
-        let message_coeffs: Vec<BigUint> = message
-            .iter()
-            .map(|bit| BigUint::from(*bit as u8))
-            .collect();
+        assert_eq!(message.len(), ring_dim, "message length must match ring dimension",);
+        let message_coeffs: Vec<BigUint> =
+            message.iter().map(|bit| BigUint::from(*bit as u8)).collect();
         let message_poly = M::P::from_biguints(&params, &message_coeffs);
         let half_q = <M::P as Poly>::Elem::half_q(&params.modulus());
         let half_const = M::P::from_elem_to_constant(&params, &half_q);
@@ -192,17 +182,11 @@ impl<
             &params,
             1,
             1,
-            DistType::GaussDist {
-                sigma: self.e_b_sigma,
-            },
+            DistType::GaussDist { sigma: self.e_b_sigma },
         );
         let c_u = (s.clone() * mpk.u.clone() + e_u).get_row(0)[0].clone() + scaled_message;
 
-        Ciphertext {
-            bgg_encodings,
-            c_b,
-            c_u,
-        }
+        Ciphertext { bgg_encodings, c_b, c_u }
     }
 
     pub async fn keygen(
@@ -211,8 +195,8 @@ impl<
         mpk: MasterPK<M>,
         msk: MasterSK<M, ST>,
         arith_circuit: ArithmeticCircuit<M::P>,
+        dir_path: PathBuf,
     ) -> FuncSK<M> {
-        let dir_path: PathBuf = "keygen".into();
         let result = arith_circuit
             .evaluate_with_bgg_pubkey::<M, SH, ST, SU>(
                 &params,
@@ -256,8 +240,8 @@ impl<
         );
         // 5. Let `c_f := s^T*A_f + e_{c_f}` in $\mathcal{R}_{q}^{1 \times m}$
         // be the BGG+ encoding corresponding to the output wire of `poly_circuit`.
-        let v = ct.c_b.concat_rows(&[&result[0].vector]) * fsk.u_f;
-        let z = ct.c_u - v.get_row(0)[0].clone();
+        let v = ct.c_b.concat_columns(&[&result[0].vector]) * fsk.u_f;
+        let z = ct.c_u - &v.get_row(0)[0];
         z.extract_bits_with_threshold(&params)[0]
     }
 }

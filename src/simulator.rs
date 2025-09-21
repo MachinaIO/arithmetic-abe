@@ -11,8 +11,7 @@ use mxx::{
     },
 };
 use num_bigint::BigUint;
-use rayon::join;
-use rayon::prelude::*;
+use rayon::{join, prelude::*};
 use std::sync::Arc;
 use thiserror::Error;
 // Logging (replaces println!)
@@ -38,22 +37,12 @@ pub enum SimulatorError {
     #[error(
         "secure knapsack len not found for secpar={target_secpar}, ring_dim={ring_dim}, max_knapsack_len={max_knapsack_len}, q={q}"
     )]
-    KnapsackNotFound {
-        target_secpar: u32,
-        ring_dim: BigUint,
-        max_knapsack_len: u32,
-        q: BigUint,
-    },
+    KnapsackNotFound { target_secpar: u32, ring_dim: BigUint, max_knapsack_len: u32, q: BigUint },
     /// Could not find a log_alpha that reaches the target security.
     #[error(
         "good log_alpha not found for target_secpar={target_secpar}, ring_dim={ring_dim}, log_q={log_q}, m={m}"
     )]
-    LogAlphaNotFound {
-        target_secpar: u32,
-        ring_dim: BigUint,
-        log_q: u32,
-        m: BigUint,
-    },
+    LogAlphaNotFound { target_secpar: u32, ring_dim: BigUint, log_q: u32, m: BigUint },
     #[error("correctness does not hold: error={e}, q_over_4={q_over_4}")]
     NotCorrect { e: BigDecimal, q_over_4: BigDecimal },
 }
@@ -107,7 +96,7 @@ pub fn bruteforce_params(
                         base_bits,
                         knapsack_len,
                         e_b_log_alpha,
-                        &*circuit,
+                        &circuit,
                         input_size,
                     ) {
                         Ok(cost) => {
@@ -167,11 +156,8 @@ fn find_min_ring_dim(
         .collect();
 
     // Pick the smallest log_dim among successes
-    if let Some((log_dim, log_alpha, knapsack_len)) = results
-        .iter()
-        .filter_map(|r| r.as_ref().ok())
-        .min_by(|a, b| a.0.cmp(&b.0))
-        .copied()
+    if let Some((log_dim, log_alpha, knapsack_len)) =
+        results.iter().filter_map(|r| r.as_ref().ok()).min_by(|a, b| a.0.cmp(&b.0)).copied()
     {
         return Ok((log_dim, log_alpha, knapsack_len));
     }
@@ -200,12 +186,14 @@ fn check_security(
     crt_depth: u32,
     base_bits: u32,
 ) -> Result<(i64, u32), SimulatorError> {
-    let log_q = (crt_bits * crt_depth) as u32;
-    let q = BigUint::from(2u32).pow(log_q as u32);
+    let log_q = crt_bits * crt_depth;
+    let q = BigUint::from(2u32).pow(log_q);
     let m_g = crt_bits.div_ceil(base_bits) * crt_depth;
     let m_b = m_g + 2;
-    // The column size of the matrix B (sampled with a trapdoor) is m_b; however, one column is an identity polynomial, so we need to ignore one column.
-    // Additionally, one more uniformly random matrix is used for encrypting a message in ABE; thus the total column size for ring-LWE is m_b - 1 + 1 = m_b.
+    // The column size of the matrix B (sampled with a trapdoor) is m_b; however, one column is an
+    // identity polynomial, so we need to ignore one column. Additionally, one more uniformly
+    // random matrix is used for encrypting a message in ABE; thus the total column size for
+    // ring-LWE is m_b - 1 + 1 = m_b.
     let (log_alpha_res, knapsack_res) = join(
         || find_log_alpha_for_ring_lwe(target_secpar, ring_dim, log_q, &BigUint::from(m_b)),
         || find_knapsack_len(target_secpar, ring_dim, &q, m_b - 1),
@@ -283,11 +271,7 @@ fn find_log_alpha_for_ring_lwe(
         // alpha = sigma/q = 2^{log_alpha}
         let alpha = 2f64.powi(mid as i32); // safe for practical parameter sizes
 
-        let e_dist = Distribution::DiscreteGaussianAlpha {
-            alpha,
-            mean: None,
-            n: None,
-        };
+        let e_dist = Distribution::DiscreteGaussianAlpha { alpha, mean: None, n: None };
 
         // s_dist = Ternary, m = provided, rough estimation
         let secpar = run_lattice_estimator_cli(
@@ -310,12 +294,12 @@ fn find_log_alpha_for_ring_lwe(
         }
     }
 
-    Ok(found.ok_or(SimulatorError::LogAlphaNotFound {
+    found.ok_or(SimulatorError::LogAlphaNotFound {
         target_secpar,
         ring_dim: ring_dim.clone(),
         log_q,
         m: m.clone(),
-    })?)
+    })
 }
 
 fn check_correctness(
@@ -333,19 +317,12 @@ fn check_correctness(
     let log_q = crt_bits * crt_depth;
     let q = BigUint::from(2u32).pow(log_q);
     let m_g = (crt_bits.div_ceil(base_bits) * crt_depth) as usize;
-    let m_b = (m_g + 2) as usize;
+    let m_b = m_g + 2;
     let e_b_sigma = BigDecimal::from_f64(2f64.powf((log_q as i64 - e_b_log_alpha) as f64)).unwrap();
     let secpar_sqrt = BigDecimal::from(target_secpar).sqrt().unwrap();
-    let ring_dim_sqrt = BigDecimal::from_biguint(ring_dim.clone(), 0)
-        .sqrt()
-        .unwrap();
+    let ring_dim_sqrt = BigDecimal::from_biguint(ring_dim.clone(), 0).sqrt().unwrap();
     let base = BigDecimal::from(1 << base_bits);
-    let sim_ctx = Arc::new(SimulatorContext::new(
-        secpar_sqrt,
-        ring_dim_sqrt,
-        base,
-        m_g as usize,
-    ));
+    let sim_ctx = Arc::new(SimulatorContext::new(secpar_sqrt, ring_dim_sqrt, base, m_g));
     let e_b = PolyMatrixNorm::sample_gauss(sim_ctx.clone(), 1, m_b, e_b_sigma.clone());
     let r_mat = PolyMatrixNorm::new(
         sim_ctx.clone(),
@@ -375,10 +352,7 @@ fn check_correctness(
     if q_over_4 > e_final.poly_norm.norm {
         Ok(log_dim * m_g as u32)
     } else {
-        Err(SimulatorError::NotCorrect {
-            e: e_final.poly_norm.norm,
-            q_over_4,
-        })
+        Err(SimulatorError::NotCorrect { e: e_final.poly_norm.norm, q_over_4 })
     }
 }
 

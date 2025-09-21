@@ -7,10 +7,8 @@ fn matrix_biguint_to_string<S>(values: &Vec<Vec<BigUint>>, serializer: S) -> Res
 where
     S: Serializer,
 {
-    let strings: Vec<Vec<String>> = values
-        .iter()
-        .map(|row| row.iter().map(|v| v.to_str_radix(10)).collect())
-        .collect();
+    let strings: Vec<Vec<String>> =
+        values.iter().map(|row| row.iter().map(|v| v.to_str_radix(10)).collect()).collect();
     strings.serialize(serializer)
 }
 
@@ -22,16 +20,13 @@ where
     strings
         .into_iter()
         .map(|row| {
-            row
-                .into_iter()
-                .map(|s| BigUint::from_str(&s).map_err(de::Error::custom))
-                .collect()
+            row.into_iter().map(|s| BigUint::from_str(&s).map_err(de::Error::custom)).collect()
         })
         .collect()
 }
 
-fn default_trapdoor_sigma() -> f64 {
-    4.578
+fn default_trapdoor_sigma() -> Option<f64> {
+    Some(4.578)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,7 +38,7 @@ pub struct Config {
     pub e_b_sigma: f64,
     pub message: Vec<bool>,
     #[serde(default = "default_trapdoor_sigma")]
-    pub trapdoor_sigma: f64,
+    pub trapdoor_sigma: Option<f64>,
     /// polynomial ring dimension
     pub ring_dimension: u32,
     /// bit size of the base for the gadget vector and decomposition
