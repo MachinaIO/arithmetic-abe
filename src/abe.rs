@@ -32,6 +32,7 @@ pub struct KeyPolicyABE<
     pub limb_bit_size: usize,
     pub num_crt_limbs: usize,
     pub crt_depth: usize,
+    pub num_eval_slots: usize,
     pub knapsack_size: Option<usize>,
     pub use_packing: bool,
     pub trapdoor_sampler: ST,
@@ -48,17 +49,21 @@ impl<
 {
     pub fn new(
         limb_bit_size: usize,
-        num_crt_limbs: usize,
-        crt_depth: usize,
+        params: &<M::P as Poly>::Params,
+        num_eval_slots: Option<usize>,
         knapsack_size: Option<usize>,
         e_b_sigma: f64,
         use_packing: bool,
         trapdoor_sampler: ST,
     ) -> Self {
+        let (_, crt_bits, crt_depth) = params.to_crt();
+        let num_crt_limbs = crt_bits.div_ceil(limb_bit_size);
+        let num_eval_slots = num_eval_slots.unwrap_or(params.ring_dimension() as usize);
         Self {
             limb_bit_size,
             num_crt_limbs,
             crt_depth,
+            num_eval_slots,
             knapsack_size,
             e_b_sigma,
             use_packing,
@@ -118,6 +123,7 @@ impl<
             inputs
                 .iter()
                 .flat_map(|input| {
+                    assert_eq!(inputs.len(), self.num_eval_slots);
                     biguint_vec_to_packed_crt_poly(self.limb_bit_size, &params, input)
                 })
                 .collect::<Vec<_>>()
@@ -171,9 +177,12 @@ impl<
             })
             .collect::<Vec<_>>();
         let ring_dim = params.ring_dimension() as usize;
-        assert_eq!(message.len(), ring_dim, "message length must match ring dimension",);
-        let message_coeffs: Vec<BigUint> =
+        assert_eq!(message.len(), self.num_eval_slots, "message length must match num_eval_slots",);
+        let mut message_coeffs: Vec<BigUint> =
             message.iter().map(|bit| BigUint::from(*bit as u8)).collect();
+        if message_coeffs.len() < ring_dim {
+            message_coeffs.resize(ring_dim, BigUint::from(0u8));
+        }
         let message_poly = M::P::from_biguints(&params, &message_coeffs);
         let half_q = <M::P as Poly>::Elem::half_q(&params.modulus());
         let half_const = M::P::from_elem_to_constant(&params, &half_q);

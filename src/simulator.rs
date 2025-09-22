@@ -1,8 +1,9 @@
-use bigdecimal::{BigDecimal, FromPrimitive, One, Pow};
+use bigdecimal::{BigDecimal, FromPrimitive, One};
 pub use mxx::simulator::lattice_estimator::run_lattice_estimator_cli;
 use mxx::{
+    arithmetic::circuit::ArithmeticCircuit,
     circuit::PolyCircuit,
-    poly::dcrt::poly::DCRTPoly,
+    poly::dcrt::{params::DCRTPolyParams, poly::DCRTPoly},
     simulator::{
         SimulatorContext,
         lattice_estimator::{Distribution, EstimatorCliError},
@@ -12,7 +13,10 @@ use mxx::{
 };
 use num_bigint::BigUint;
 use rayon::{join, prelude::*};
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU32, Ordering},
+};
 use thiserror::Error;
 // Logging (replaces println!)
 // Configure a logger (e.g., env_logger) in the binary/tests to see output.
@@ -22,7 +26,7 @@ pub enum SimulatorError {
     /// Error bubbling up from the lattice estimator CLI.
     #[error(transparent)]
     Estimator(#[from] EstimatorCliError),
-    /// No knapsack length in [1, max_knapsack_len] reached the target security.
+    /// No knapsack length in [1, max_knapsack_size] reached the target security.
     #[error(
         "secure ring dimension len not found for secpar={target_secpar}, crt_bits={crt_bits}, crt_depth={crt_depth}, base_bits={base_bits}"
     )]
@@ -33,11 +37,11 @@ pub enum SimulatorError {
         base_bits: u32,
         log_dim_range: (u32, u32),
     },
-    /// No knapsack length in [1, max_knapsack_len] reached the target security.
+    /// No knapsack length in [1, max_knapsack_size] reached the target security.
     #[error(
-        "secure knapsack len not found for secpar={target_secpar}, ring_dim={ring_dim}, max_knapsack_len={max_knapsack_len}, q={q}"
+        "secure knapsack len not found for secpar={target_secpar}, ring_dim={ring_dim}, max_knapsack_size={max_knapsack_size}, q={q}"
     )]
-    KnapsackNotFound { target_secpar: u32, ring_dim: BigUint, max_knapsack_len: u32, q: BigUint },
+    KnapsackNotFound { target_secpar: u32, ring_dim: BigUint, max_knapsack_size: u32, q: BigUint },
     /// Could not find a log_alpha that reaches the target security.
     #[error(
         "good log_alpha not found for target_secpar={target_secpar}, ring_dim={ring_dim}, log_q={log_q}, m={m}"
@@ -47,18 +51,19 @@ pub enum SimulatorError {
     NotCorrect { e: BigDecimal, q_over_4: BigDecimal },
 }
 
-// Output (crt_depth, base_bits, log_dim, e_b_sigma, knapsack_len) or None
-pub fn bruteforce_params(
+// Output (crt_depth, base_bits, log_dim, e_b_sigma, knapsack_size) or None
+pub fn bruteforce_params_for_bench_arith_circuit(
     target_secpar: u32,
     crt_bits: u32,
     crt_depth_range: (u32, u32),
     base_bits_range: (u32, u32),
     log_dim_range: (u32, u32),
-    circuit: PolyCircuit<DCRTPoly>,
-    input_size: usize,
+    num_eval_slots: Option<usize>,
+    limb_bit_size: usize,
+    height: usize,
+    // circuit: PolyCircuit<DCRTPoly>,
 ) -> Option<(u32, u32, u32, f64, u32)> {
-    // (cost, crt_depth, base_bits, log_dim, e_b_sigma, knapsack_len)
-    let circuit = Arc::new(circuit);
+    // (cost, crt_depth, base_bits, log_dim, e_b_sigma, knapsack_size)
     let outputs: Vec<(u32, u32, u32, u32, f64, u32)> =
         (base_bits_range.0..=base_bits_range.1)
             .into_par_iter()
@@ -68,8 +73,8 @@ pub fn bruteforce_params(
                 let mut hi = crt_depth_range.1;
                 while lo <= hi {
                     let crt_depth = lo + ((hi - lo) / 2);
-                    log::debug!("base_bits {base_bits} crt_depth {crt_depth}");
-                    let (log_dim, e_b_log_alpha, knapsack_len) = match find_min_ring_dim(
+                    log::info!("base_bits {base_bits} crt_depth {crt_depth}");
+                    let (log_dim, e_b_log_alpha, knapsack_size) = match find_min_ring_dim(
                         target_secpar,
                         crt_bits,
                         crt_depth,
@@ -78,9 +83,9 @@ pub fn bruteforce_params(
                     ) {
                         Ok(result) => result,
                         Err(e) => {
-                            log::debug!(
-                                "Security error with target_secpar = {}, crt_bits = {}, base_bits = {}, crt_depth = {}, input_size = {}: {}",
-                                target_secpar, crt_bits, base_bits, crt_depth, input_size, e
+                            log::info!(
+                                "Security error with target_secpar = {}, crt_bits = {}, base_bits = {}, crt_depth = {}, limb_bit_size = {}, height = {}: {}",
+                                target_secpar, crt_bits, base_bits, crt_depth, limb_bit_size, height, e
                             );
                             // try smaller crt_depth
                             if crt_depth == 0 { break; }
@@ -88,38 +93,49 @@ pub fn bruteforce_params(
                             continue;
                         }
                     };
+                    log::info!(
+                        "Found log_dim = {}, e_b_log_alpha = {}, knapsack_size = {}",
+                        log_dim,
+                        e_b_log_alpha,
+                        knapsack_size
+                    );
+                    let ring_dim = (1 << log_dim) as u32;
+                    let params = DCRTPolyParams::new(ring_dim, crt_depth as usize, crt_bits as usize, base_bits);
+                    let circuit = ArithmeticCircuit::benchmark_multiplication_tree(&params, limb_bit_size, num_eval_slots.unwrap_or(ring_dim as usize), true,  height);
+                    log::info!("circuit constructed with crt_depth = {}, log_dim = {}, base_bits = {}, knapsack_size = {}, e_b_log_alpha = {}", crt_depth, log_dim, base_bits, knapsack_size, e_b_log_alpha);
                     match check_correctness(
                         target_secpar,
                         log_dim,
                         crt_bits,
                         crt_depth,
                         base_bits,
-                        knapsack_len,
+                        knapsack_size,
                         e_b_log_alpha,
-                        &circuit,
-                        input_size,
+                        &circuit.poly_circuit,
                     ) {
                         Ok(cost) => {
                             log::info!(
-                                "Found with target_secpar = {}, crt_bits = {}, base_bits = {}, crt_depth = {}, input_size = {}, cost = {}",
-                                target_secpar, crt_bits, base_bits, crt_depth, input_size, cost
+                                "Found with target_secpar = {}, crt_bits = {}, base_bits = {}, crt_depth = {}, cost = {}",
+                                target_secpar, crt_bits, base_bits, crt_depth,  cost
                             );
                             local.push((
                                 cost,
                                 crt_depth,
                                 base_bits,
                                 log_dim,
-                                2.0f64.pow(crt_bits as f64 * crt_depth as f64 + e_b_log_alpha as f64),
-                                knapsack_len,
+                                2.0f64.powf(
+                                    crt_bits as f64 * crt_depth as f64 + e_b_log_alpha as f64,
+                                ),
+                                knapsack_size,
                             ));
                             // search smaller crt_depth to continue binary search
                             if crt_depth == 0 { break; }
                             hi = crt_depth - 1;
                         }
                         Err(e) => {
-                            log::debug!(
-                                "Correctness error with target_secpar = {}, crt_bits = {}, base_bits = {}, crt_depth = {}, input_size = {}: {}",
-                                target_secpar, crt_bits, base_bits, crt_depth, input_size, e
+                            log::info!(
+                                "Correctness error with target_secpar = {}, crt_bits = {}, base_bits = {}, crt_depth = {}: {}",
+                                target_secpar, crt_bits, base_bits, crt_depth, e
                             );
                             // try larger crt_depth
                             lo = crt_depth + 1;
@@ -149,17 +165,17 @@ fn find_min_ring_dim(
             log::debug!("log_dim {}", log_dim);
             let ring_dim = BigUint::from(2u32).pow(log_dim);
             match check_security(target_secpar, &ring_dim, crt_bits, crt_depth, base_bits) {
-                Ok((log_alpha, knapsack_len)) => Ok((log_dim, log_alpha, knapsack_len)),
+                Ok((log_alpha, knapsack_size)) => Ok((log_dim, log_alpha, knapsack_size)),
                 Err(e) => Err(e),
             }
         })
         .collect();
 
     // Pick the smallest log_dim among successes
-    if let Some((log_dim, log_alpha, knapsack_len)) =
+    if let Some((log_dim, log_alpha, knapsack_size)) =
         results.iter().filter_map(|r| r.as_ref().ok()).min_by(|a, b| a.0.cmp(&b.0)).copied()
     {
-        return Ok((log_dim, log_alpha, knapsack_len));
+        return Ok((log_dim, log_alpha, knapsack_size));
     }
 
     // If there were no successes, propagate any Estimator error if present
@@ -196,52 +212,93 @@ fn check_security(
     // ring-LWE is m_b - 1 + 1 = m_b.
     let (log_alpha_res, knapsack_res) = join(
         || find_log_alpha_for_ring_lwe(target_secpar, ring_dim, log_q, &BigUint::from(m_b)),
-        || find_knapsack_len(target_secpar, ring_dim, &q, m_b - 1),
+        || find_knapsack_size(target_secpar, ring_dim, &q, m_b - 1),
     );
     let log_alpha = log_alpha_res?;
     log::debug!("found log_alpha_res = {log_alpha}");
-    let knapsack_len = knapsack_res?;
-    log::debug!("found knapsack_len = {knapsack_len}");
-    Ok((log_alpha, knapsack_len))
+    let knapsack_size = knapsack_res?;
+    log::debug!("found knapsack_size = {knapsack_size}");
+    Ok((log_alpha, knapsack_size))
 }
 
-/// Returns the smallest `knapsack_len` in [1, max_knapsack_len] whose estimated
+/// Returns the smallest `knapsack_size` in [1, max_knapsack_size] whose estimated
 /// security is at least `target_secpar`, or an error if estimation fails or none found.
 /// - `target_secpar`: required minimum security parameter.
 /// - `ring_dim`: base ring dimension.
 /// - `q`: modulus (as BigUint).
-/// - `max_knapsack_len`: upper bound to search (inclusive).
-fn find_knapsack_len(
+/// - `max_knapsack_size`: upper bound to search (inclusive).
+fn find_knapsack_size(
     target_secpar: u32,
     ring_dim: &BigUint,
     q: &BigUint,
-    max_knapsack_len: u32,
+    max_knapsack_size: u32,
 ) -> Result<u32, SimulatorError> {
-    for knapsack_len in 2..=max_knapsack_len {
-        // Effective LWE dimension n = ring_dim * knapsack_len - ring_dim
-        let n = ring_dim * BigUint::from(knapsack_len) - ring_dim;
-        // s_dist = Ternary, e_dist = Ternary, m = n, exact = false (rough)
-        let secpar = run_lattice_estimator_cli(
-            &n,
-            q,
-            &Distribution::Ternary,
-            &Distribution::Ternary,
-            Some(&n),
-            false,
-        )?;
-        log::debug!("called estimator {secpar} in find_knapsack_len");
-
-        if secpar as u32 >= target_secpar {
-            return Ok(knapsack_len);
-        }
+    if max_knapsack_size < 2 {
+        return Err(SimulatorError::KnapsackNotFound {
+            target_secpar,
+            ring_dim: ring_dim.clone(),
+            max_knapsack_size,
+            q: q.clone(),
+        });
     }
 
-    Err(SimulatorError::KnapsackNotFound {
-        target_secpar,
-        ring_dim: ring_dim.clone(),
-        max_knapsack_len,
-        q: q.clone(),
-    })
+    let best = AtomicU32::new(0);
+
+    (2..=max_knapsack_size).into_par_iter().try_for_each(
+        |knapsack_size| -> Result<(), SimulatorError> {
+            let current_best = best.load(Ordering::Relaxed);
+            if current_best != 0 && knapsack_size >= current_best {
+                return Ok(());
+            }
+
+            // Effective LWE dimension n = ring_dim * knapsack_size - ring_dim
+            let n = ring_dim * BigUint::from(knapsack_size) - ring_dim;
+            // s_dist = Ternary, e_dist = Ternary, m = n, exact = false (rough)
+            let secpar = run_lattice_estimator_cli(
+                &n,
+                q,
+                &Distribution::Ternary,
+                &Distribution::Ternary,
+                Some(&n),
+                false,
+            )?;
+            log::debug!("called estimator {secpar} in find_knapsack_size for {knapsack_size}");
+
+            if secpar as u32 >= target_secpar {
+                let mut observed = best.load(Ordering::Acquire);
+                while observed == 0 || knapsack_size < observed {
+                    match best.compare_exchange(
+                        observed,
+                        knapsack_size,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => break,
+                        Err(actual) => {
+                            if actual != 0 && knapsack_size >= actual {
+                                break;
+                            }
+                            observed = actual;
+                        }
+                    }
+                }
+            }
+
+            Ok(())
+        },
+    )?;
+
+    let best_value = best.load(Ordering::Relaxed);
+    if best_value != 0 {
+        Ok(best_value)
+    } else {
+        Err(SimulatorError::KnapsackNotFound {
+            target_secpar,
+            ring_dim: ring_dim.clone(),
+            max_knapsack_size,
+            q: q.clone(),
+        })
+    }
 }
 
 /// Binary-search for the smallest integer `log_alpha` in [-log_q, -1] such that
@@ -308,20 +365,20 @@ fn check_correctness(
     crt_bits: u32,
     crt_depth: u32,
     base_bits: u32,
-    knapsack_len: u32,
+    knapsack_size: u32,
     e_b_log_alpha: i64,
     circuit: &PolyCircuit<DCRTPoly>,
-    input_size: usize,
 ) -> Result<u32, SimulatorError> {
+    let input_size = circuit.num_input();
     let ring_dim = BigUint::from(2u32).pow(log_dim);
     let log_q = crt_bits * crt_depth;
     let q = BigUint::from(2u32).pow(log_q);
     let m_g = (crt_bits.div_ceil(base_bits) * crt_depth) as usize;
     let m_b = m_g + 2;
     let e_b_sigma = BigDecimal::from_f64(2f64.powf((log_q as i64 - e_b_log_alpha) as f64)).unwrap();
-    let secpar_sqrt = BigDecimal::from(target_secpar).sqrt().unwrap();
+    let secpar_sqrt = BigDecimal::from_u32(target_secpar).unwrap().sqrt().unwrap();
     let ring_dim_sqrt = BigDecimal::from_biguint(ring_dim.clone(), 0).sqrt().unwrap();
-    let base = BigDecimal::from(1 << base_bits);
+    let base = BigDecimal::from_biguint((BigUint::from(1u32)) << base_bits, 0);
     let sim_ctx = Arc::new(SimulatorContext::new(secpar_sqrt, ring_dim_sqrt, base, m_g));
     let e_b = PolyMatrixNorm::sample_gauss(sim_ctx.clone(), 1, m_b, e_b_sigma.clone());
     let r_mat = PolyMatrixNorm::new(
@@ -329,11 +386,16 @@ fn check_correctness(
         m_b,
         m_g * input_size,
         BigDecimal::one(),
-        Some(m_b - knapsack_len as usize),
+        Some(m_b - knapsack_size as usize),
     );
     let e_a = &e_b * r_mat;
-    let out_wire_norms =
-        circuit.simulate_max_h_norm(sim_ctx.clone(), BigDecimal::from(crt_bits), input_size);
+    log::info!("before simulation: e_b = {:?}, e_a = {:?}", e_b, e_a);
+    let out_wire_norms = circuit.simulate_max_h_norm(
+        sim_ctx.clone(),
+        BigDecimal::from_u32(crt_bits).unwrap(),
+        input_size,
+    );
+    log::info!("after simulation");
     let max_out_wire = out_wire_norms
         .into_iter()
         .max_by(|a, b| a.h_norm.poly_norm.norm.cmp(&b.h_norm.poly_norm.norm))
@@ -348,7 +410,7 @@ fn check_correctness(
     preimage_norm_bottom.ncol = 1;
     let e_u = PolyMatrixNorm::sample_gauss(sim_ctx.clone(), 1, 1, e_b_sigma);
     let e_final = &e_b * preimage_norm_top + e_after_eval * preimage_norm_bottom + e_u;
-    let q_over_4 = BigDecimal::from_biguint(q, 0) / 4;
+    let q_over_4 = BigDecimal::from_biguint(q, 0) / BigDecimal::from_u32(4).unwrap();
     if q_over_4 > e_final.poly_norm.norm {
         Ok(log_dim * m_g as u32)
     } else {
@@ -359,21 +421,23 @@ fn check_correctness(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mxx::{circuit::PolyCircuit, poly::dcrt::poly::DCRTPoly};
-
     // Initialize logger for test output
     use env_logger;
 
     #[test]
-    fn test_bruteforce_params_with_mul() {
+    fn test_bruteforce_params() {
         // Initialize env_logger once for tests; ignore if already set.
         let _ = env_logger::builder().is_test(true).try_init();
-        let mut circuit = PolyCircuit::<DCRTPoly>::new();
-        let ins = circuit.input(2);
-        let out_gid = circuit.mul_gate(ins[0], ins[1]);
-        circuit.output(vec![out_gid]);
-
-        let params = bruteforce_params(100, 41, (2, 4), (15, 18), (13, 16), circuit, 2);
+        let params = bruteforce_params_for_bench_arith_circuit(
+            100,
+            41,
+            (2, 4),
+            (15, 18),
+            (13, 16),
+            Some(2),
+            2,
+            3,
+        );
         assert!(params.is_some());
         println!("params: {:?}", params);
     }
