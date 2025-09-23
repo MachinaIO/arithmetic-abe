@@ -10,8 +10,9 @@ use mxx::{
         poly_matrix_norm::PolyMatrixNorm,
         wire_norm::NormPltLweEvaluator,
     },
+    utils::log_mem,
 };
-use num_bigint::BigUint;
+use num_bigint::{BigUint, Sign};
 use rayon::{join, prelude::*};
 use std::sync::{
     Arc,
@@ -101,8 +102,10 @@ pub fn bruteforce_params_for_bench_arith_circuit(
                     );
                     let ring_dim = (1 << log_dim) as u32;
                     let params = DCRTPolyParams::new(ring_dim, crt_depth as usize, crt_bits as usize, base_bits);
-                    let circuit = ArithmeticCircuit::benchmark_multiplication_tree(&params, limb_bit_size, num_eval_slots.unwrap_or(ring_dim as usize), true,  height);
+                    let use_packing =  limb_bit_size > 1;
+                    let circuit = ArithmeticCircuit::benchmark_multiplication_tree(&params, limb_bit_size, num_eval_slots.unwrap_or(ring_dim as usize), use_packing,  height);
                     log::info!("circuit constructed with crt_depth = {}, log_dim = {}, base_bits = {}, knapsack_size = {}, e_b_log_alpha = {}", crt_depth, log_dim, base_bits, knapsack_size, e_b_log_alpha);
+                    log::info!("poly circuit depth {}",circuit.poly_circuit.depth());
                     match check_correctness(
                         target_secpar,
                         log_dim,
@@ -319,7 +322,7 @@ fn find_log_alpha_for_ring_lwe(
 
     // Search bounds (inclusive) over integer log_alpha.
     let mut lo: i64 = -(log_q as i64);
-    let mut hi: i64 = -1;
+    let mut hi: i64 = 5 - (log_q as i64);
     let mut found: Option<i64> = None;
 
     while lo <= hi {
@@ -381,6 +384,7 @@ fn check_correctness(
     let base = BigDecimal::from_biguint((BigUint::from(1u32)) << base_bits, 0);
     let sim_ctx = Arc::new(SimulatorContext::new(secpar_sqrt, ring_dim_sqrt, base, m_g));
     let e_b = PolyMatrixNorm::sample_gauss(sim_ctx.clone(), 1, m_b, e_b_sigma.clone());
+
     let r_mat = PolyMatrixNorm::new(
         sim_ctx.clone(),
         m_b,
@@ -388,7 +392,7 @@ fn check_correctness(
         BigDecimal::one(),
         Some(m_b - knapsack_size as usize),
     );
-    let e_a = &e_b * r_mat;
+    let e_a = &e_b * &r_mat;
     log::info!("before simulation: e_b = {:?}, e_a = {:?}", e_b, e_a);
     let out_wire_norms = circuit.simulate_max_h_norm(
         sim_ctx.clone(),
@@ -412,6 +416,16 @@ fn check_correctness(
     let e_final = &e_b * preimage_norm_top + e_after_eval * preimage_norm_bottom + e_u;
     let q_over_4 = BigDecimal::from_biguint(q, 0) / BigDecimal::from_u32(4).unwrap();
     if q_over_4 > e_final.poly_norm.norm {
+        log_mem(format!(
+            "q_over_4: {:?}, e_final: {:?}",
+            q_over_4.with_scale_round(0, bigdecimal::RoundingMode::Ceiling).to_string().len(),
+            e_final
+                .poly_norm
+                .norm
+                .with_scale_round(0, bigdecimal::RoundingMode::Ceiling)
+                .to_string()
+                .len()
+        ));
         Ok(log_dim * m_g as u32)
     } else {
         Err(SimulatorError::NotCorrect { e: e_final.poly_norm.norm, q_over_4 })

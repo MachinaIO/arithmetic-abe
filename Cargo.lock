@@ -746,7 +746,7 @@ dependencies = [
 [[package]]
 name = "mxx"
 version = "0.1.0"
-source = "git+https://github.com/MachinaIO/mxx.git?branch=feat%2Ffix-crt#1df7490e523dd476ba9489febea866af99a32e92"
+source = "git+https://github.com/MachinaIO/mxx.git?branch=feat%2Ffix-crt#f77c877bd7cbef1229fe5ba655212056f898f86c"
 dependencies = [
  "bigdecimal",
  "bincode",
