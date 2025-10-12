@@ -102,10 +102,9 @@ pub fn bruteforce_params_for_bench_arith_circuit(
                     );
                     let ring_dim = (1 << log_dim) as u32;
                     let params = DCRTPolyParams::new(ring_dim, crt_depth as usize, crt_bits as usize, base_bits);
-                    let use_packing =  limb_bit_size > 1;
-                    let circuit = ArithmeticCircuit::benchmark_multiplication_tree(&params, limb_bit_size, num_eval_slots.unwrap_or(ring_dim as usize), use_packing,  height);
+                    let circuit = ArithmeticCircuit::benchmark_multiplication_tree(&params, limb_bit_size, num_eval_slots.unwrap_or(ring_dim as usize), height,true);
                     log::info!("circuit constructed with crt_depth = {}, log_dim = {}, base_bits = {}, knapsack_size = {}, e_b_log_alpha = {}", crt_depth, log_dim, base_bits, knapsack_size, e_b_log_alpha);
-                    log::info!("poly circuit depth {}",circuit.poly_circuit.depth());
+                    log::info!("poly circuit non_free_depth {}",circuit.poly_circuit.non_free_depth());
                     match check_correctness(
                         target_secpar,
                         log_dim,
@@ -418,13 +417,12 @@ fn check_correctness(
     if q_over_4 > e_final.poly_norm.norm {
         log_mem(format!(
             "q_over_4: {:?}, e_final: {:?}",
-            q_over_4.with_scale_round(0, bigdecimal::RoundingMode::Ceiling).to_string().len(),
+            q_over_4.with_scale_round(0, bigdecimal::RoundingMode::Ceiling).to_string(),
             e_final
                 .poly_norm
                 .norm
                 .with_scale_round(0, bigdecimal::RoundingMode::Ceiling)
                 .to_string()
-                .len()
         ));
         Ok(log_dim * m_g as u32)
     } else {

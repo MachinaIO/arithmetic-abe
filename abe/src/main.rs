@@ -11,7 +11,7 @@ use chrono::Local;
 use clap::{Parser, Subcommand};
 use keccak_asm::Keccak256;
 use mxx::{
-    arithmetic::circuit::{ArithGateId, ArithmeticCircuit},
+    arithmetic::circuit::ArithmeticCircuit,
     matrix::dcrt_poly::DCRTPolyMatrix,
     poly::{
         PolyParams,
@@ -205,7 +205,6 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         config.num_eval_slots,
         config.knapsack_size,
         config.e_b_sigma,
-        true,
         trapdoor_sampler,
     );
     let mut t_setup = Duration::ZERO;
@@ -217,8 +216,8 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         &params,
         config.limb_bit_size,
         config.ring_dimension as usize,
-        true,
         config.arith_height as usize,
+        false,
     );
     log_mem("finished building arithmetic circuit");
 
@@ -271,7 +270,6 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         config.num_eval_slots,
         config.knapsack_size,
         config.e_b_sigma,
-        true,
         trapdoor_sampler,
     );
     let mut t_read_mpk = Duration::ZERO;
@@ -285,8 +283,8 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         &params,
         config.limb_bit_size,
         config.ring_dimension as usize,
-        true,
         config.arith_height as usize,
+        false,
     );
     log_mem("finished building arithmetic circuit");
 

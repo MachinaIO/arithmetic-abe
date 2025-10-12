@@ -9,9 +9,7 @@ use mxx::{
         sampler::{BGGEncodingSampler, BGGPublicKeySampler},
     },
     element::PolyElem,
-    gadgets::crt::{
-        biguint_vec_to_crt_poly, biguint_vec_to_packed_crt_poly, num_limbs_of_crt_poly,
-    },
+    gadgets::crt::encode_modulo_poly,
     lookup::lwe_eval::LweBggEncodingPltEvaluator,
     matrix::PolyMatrix,
     poly::{Poly, PolyParams},
@@ -34,7 +32,6 @@ pub struct KeyPolicyABE<
     pub crt_depth: usize,
     pub num_eval_slots: usize,
     pub knapsack_size: Option<usize>,
-    pub use_packing: bool,
     pub trapdoor_sampler: ST,
     _sh: PhantomData<SH>,
     _su: PhantomData<SU>,
@@ -53,7 +50,6 @@ impl<
         num_eval_slots: Option<usize>,
         knapsack_size: Option<usize>,
         e_b_sigma: f64,
-        use_packing: bool,
         trapdoor_sampler: ST,
     ) -> Self {
         let (_, crt_bits, crt_depth) = params.to_crt();
@@ -66,7 +62,6 @@ impl<
             num_eval_slots,
             knapsack_size,
             e_b_sigma,
-            use_packing,
             trapdoor_sampler,
             _sh: PhantomData,
             _su: PhantomData,
@@ -119,25 +114,15 @@ impl<
         };
         let c_b = s.clone() * mpk.b_matrix.as_ref() + &c_b_error;
         let bgg_encoding_sampler = BGGEncodingSampler::<SU>::new(&params, &s.get_row(0), None);
-        let plaintexts = if self.use_packing {
-            inputs
-                .iter()
-                .flat_map(|input| {
-                    assert_eq!(inputs.len(), self.num_eval_slots);
-                    biguint_vec_to_packed_crt_poly(self.limb_bit_size, &params, input)
-                })
-                .collect::<Vec<_>>()
-        } else {
-            inputs
-                .iter()
-                .flat_map(|input| biguint_vec_to_crt_poly(self.limb_bit_size, &params, input))
-                .collect::<Vec<_>>()
-        };
-        let num_given_input_polys = if self.use_packing {
-            num_packed_crt_poly::<M::P>(self.limb_bit_size, &params, num_inputs)
-        } else {
-            num_inputs * num_limbs_of_crt_poly::<M::P>(self.limb_bit_size, &params)
-        };
+        let plaintexts = inputs
+            .iter()
+            .flat_map(|input| {
+                assert_eq!(inputs.len(), self.num_eval_slots);
+                encode_modulo_poly(self.limb_bit_size, &params, input)
+            })
+            .collect::<Vec<_>>();
+        let num_given_input_polys =
+            num_modulo_poly::<M::P>(self.limb_bit_size, &params, num_inputs);
         let reveal_plaintexts = vec![true; num_given_input_polys + 1];
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, 1);
         let pubkeys = bgg_pubkey_sampler.sample(&params, TAG_BGG_PUBKEY, &reveal_plaintexts);
@@ -255,11 +240,7 @@ impl<
     }
 }
 
-fn num_packed_crt_poly<P: Poly>(
-    limb_bit_size: usize,
-    params: &P::Params,
-    num_inputs: usize,
-) -> usize {
+fn num_modulo_poly<P: Poly>(limb_bit_size: usize, params: &P::Params, num_inputs: usize) -> usize {
     let (_, crt_bits, _) = params.to_crt();
     let num_limbs_per_slot = crt_bits.div_ceil(limb_bit_size);
     num_inputs * num_limbs_per_slot
