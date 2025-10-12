@@ -12,7 +12,7 @@ use mxx::{
     },
     utils::log_mem,
 };
-use num_bigint::{BigUint, Sign};
+use num_bigint::BigUint;
 use rayon::{join, prelude::*};
 use std::sync::{
     Arc,
@@ -415,15 +415,41 @@ fn check_correctness(
     let e_final = &e_b * preimage_norm_top + e_after_eval * preimage_norm_bottom + e_u;
     let q_over_4 = BigDecimal::from_biguint(q, 0) / BigDecimal::from_u32(4).unwrap();
     if q_over_4 > e_final.poly_norm.norm {
-        log_mem(format!(
-            "q_over_4: {:?}, e_final: {:?}",
-            q_over_4.with_scale_round(0, bigdecimal::RoundingMode::Ceiling).to_string(),
-            e_final
+        // Compute bit lengths of q_over_4 and e_final (after rounding up to integer)
+        let q_over_4_bits = {
+            let s = q_over_4
+                .with_scale_round(0, bigdecimal::RoundingMode::Ceiling)
+                .to_string();
+            if let Some(n) = BigUint::parse_bytes(s.as_bytes(), 10) {
+                let bytes = n.to_bytes_be();
+                if bytes.is_empty() {
+                    0usize
+                } else {
+                    (bytes.len() - 1) * 8 + (8 - bytes[0].leading_zeros() as usize)
+                }
+            } else {
+                0usize
+            }
+        };
+        let e_final_bits = {
+            let s = e_final
                 .poly_norm
                 .norm
                 .with_scale_round(0, bigdecimal::RoundingMode::Ceiling)
-                .to_string()
-        ));
+                .to_string();
+            if let Some(n) = BigUint::parse_bytes(s.as_bytes(), 10) {
+                let bytes = n.to_bytes_be();
+                if bytes.is_empty() {
+                    0usize
+                } else {
+                    (bytes.len() - 1) * 8 + (8 - bytes[0].leading_zeros() as usize)
+                }
+            } else {
+                0usize
+            }
+        };
+
+        log_mem(format!("q_over_4_bits: {}, e_final_bits: {}", q_over_4_bits, e_final_bits));
         Ok(log_dim * m_g as u32)
     } else {
         Err(SimulatorError::NotCorrect { e: e_final.poly_norm.norm, q_over_4 })
