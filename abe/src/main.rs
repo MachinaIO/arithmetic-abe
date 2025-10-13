@@ -52,6 +52,13 @@ enum Commands {
         #[arg(short, long)]
         data_dir: PathBuf,
     },
+    BenchRunOnline {
+        #[arg(short, long)]
+        config: PathBuf,
+
+        #[arg(short, long)]
+        data_dir: PathBuf,
+    },
 }
 
 fn init_logging() {
@@ -86,6 +93,14 @@ async fn main() -> Result<()> {
             let run_config: RunConfig = toml::from_str(&contents)
                 .with_context(|| format!("failed to parse RunConfig from {}", config.display()))?;
             run_bench_offline(run_config, data_dir).await?;
+        }
+        Commands::BenchRunOnline { config, data_dir } => {
+            log_mem(format!("Loading run config: path={}", config.display()));
+            let contents = fs::read_to_string(&config)
+                .with_context(|| format!("failed to read run config from {}", config.display()))?;
+            let run_config: RunConfig = toml::from_str(&contents)
+                .with_context(|| format!("failed to parse RunConfig from {}", config.display()))?;
+            run_bench_online(run_config, data_dir).await?;
         }
     }
 

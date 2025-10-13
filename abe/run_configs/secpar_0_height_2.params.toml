@@ -1,0 +1,12 @@
+config_id = "secpar_0_height_2.params.toml"
+target_secpar = 0
+crt_depth = 2
+crt_bits = 21
+ring_dimension = 4
+num_eval_slots = 1
+e_b_sigma = 0.0
+trapdoor_sigma = 4.578
+base_bits = 17
+limb_bit_size = 3
+arith_input_size = 4
+arith_height = 2
