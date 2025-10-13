@@ -224,13 +224,14 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     );
     let mut t_setup = Duration::ZERO;
     let mut t_keygen = Duration::ZERO;
+    let num_eval_slots = config.num_eval_slots.unwrap_or(params.ring_dimension() as usize);
 
     log_mem("starting KeyPolicy ABE");
     log_mem("start building arithmetic circuit");
     let arith_circuit = ArithmeticCircuit::<DCRTPoly>::benchmark_multiplication_tree(
         &params,
         config.limb_bit_size,
-        config.ring_dimension as usize,
+        num_eval_slots,
         config.arith_height as usize,
         false,
     );
@@ -262,6 +263,7 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     mpk.write(dir_path.join(format!("{}.mpk", config.config_id)))?;
     fsk.write(dir_path.join(format!("{}.fsk", config.config_id)))?;
     log_mem("finished writing mpk and fsk files");
+
     Ok(())
 }
 
@@ -291,19 +293,19 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     let mut t_enc = Duration::ZERO;
     let mut t_read_fsk = Duration::ZERO;
     let mut t_dec = Duration::ZERO;
+    let num_eval_slots = config.num_eval_slots.unwrap_or(params.ring_dimension() as usize);
 
     log_mem("starting KeyPolicy ABE");
     log_mem("start building arithmetic circuit");
     let arith_circuit = ArithmeticCircuit::<DCRTPoly>::benchmark_multiplication_tree(
         &params,
         config.limb_bit_size,
-        config.ring_dimension as usize,
+        num_eval_slots,
         config.arith_height as usize,
         false,
     );
     log_mem("finished building arithmetic circuit");
 
-    let ring_dim = params.ring_dimension() as usize;
     // 3) enc
     log_mem("starting enc");
     let mpk = timed_read(
@@ -323,8 +325,8 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
             abe.enc(
                 params.clone(),
                 mpk,
-                &vec![vec![BigUint::ZERO; ring_dim]; config.arith_input_size],
-                &vec![true; ring_dim],
+                &vec![vec![BigUint::ZERO; num_eval_slots]; config.arith_input_size],
+                &vec![true; num_eval_slots],
             )
         },
         &mut t_enc,
@@ -360,112 +362,3 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     log_mem(format!("finished decryption: result={}", bit));
     Ok(())
 }
-
-// async fn run_env_configured(config: PathBuf, height: usize, data_dir: PathBuf) -> Result<()> {
-//     assert_ne!(height, 0);
-//     let contents = fs::read_to_string(&config).unwrap();
-//     let cfg: RunConfig = toml::from_str(&contents).unwrap();
-//     let params =
-//         DCRTPolyParams::new(cfg.ring_dimension, cfg.crt_depth, cfg.crt_bits, cfg.base_bits);
-
-//     let trapdoor_sampler =
-//         DCRTPolyTrapdoorSampler::new(&params, cfg.trapdoor_sigma.expect("trapdoor sigma exist"));
-//     let use_packing = false;
-//     let abe = KeyPolicyABE::<
-//         DCRTPolyMatrix,
-//         DCRTPolyHashSampler<Keccak256>,
-//         DCRTPolyTrapdoorSampler,
-//         DCRTPolyUniformSampler,
-//     >::new(
-//         cfg.limb_bit_size,
-//         cfg.crt_bits.div_ceil(cfg.limb_bit_size),
-//         cfg.crt_depth,
-//         cfg.knapsack_size,
-//         cfg.e_b_sigma,
-//         use_packing,
-//         trapdoor_sampler,
-//     );
-
-//     let mut t_setup = Duration::ZERO;
-//     // let mut t_keygen = Duration::ZERO;
-//     let mut t_enc = Duration::ZERO;
-//     let mut t_dec = Duration::ZERO;
-
-//     info!(target: "abe",  "starting KeyPolicy ABE");
-
-//     let num_inputs = cfg.input.len();
-//     let mut arith = ArithmeticCircuit::<DCRTPoly>::setup(
-//         &params,
-//         cfg.limb_bit_size,
-//         cfg.ring_dimension as usize,
-//         num_inputs,
-//         use_packing,
-//         true,
-//     );
-//     let num_leaves = 1 << (height - 1);
-//     assert!(
-//         cfg.input.len() >= num_leaves * 2,
-//         "Need at least {} inputs for height {} tree",
-//         num_leaves * 2,
-//         height
-//     );
-//     info!("setup done");
-
-//     let mut current_layer = Vec::new();
-//     for i in 0..num_leaves {
-//         let left_idx = ArithGateId::new(i * 2);
-//         let right_idx = ArithGateId::new(i * 2 + 1);
-//         let mul_gate = arith.mul(left_idx, right_idx);
-//         current_layer.push(mul_gate);
-//     }
-//     for _ in 1..height {
-//         let mut next_layer = Vec::new();
-//         let pairs_in_layer = current_layer.len() / 2;
-
-//         for i in 0..pairs_in_layer {
-//             let left = current_layer[i * 2];
-//             let right = current_layer[i * 2 + 1];
-//             let mul_gate = arith.mul(left, right);
-//             next_layer.push(mul_gate);
-//         }
-
-//         current_layer = next_layer;
-//     }
-//     assert_eq!(current_layer.len(), 1, "Should have exactly one root gate");
-//     arith.output(current_layer[0]);
-
-//     // 1) setup
-//     let (mpk, msk): (MasterPK<DCRTPolyMatrix>, MasterSK<DCRTPolyMatrix, DCRTPolyTrapdoorSampler>)
-// =         timed_read("setup", || abe.setup(params.clone(), num_inputs), &mut t_setup);
-
-//     let dir_path = if data_dir.exists() {
-//         data_dir
-//     } else {
-//         fs::create_dir_all(&data_dir)?;
-//         data_dir
-//     };
-
-//     info!(target: "abe",  "finished setup");
-
-//     // 2) keygen
-//     let fsk: FuncSK<DCRTPolyMatrix> =
-//         abe.keygen(params.clone(), mpk.clone(), msk.clone(), arith.clone(), dir_path).await;
-
-//     // 3) enc
-//     let ct: Ciphertext<DCRTPolyMatrix> = timed_read(
-//         "enc",
-//         || abe.enc(params.clone(), mpk.clone(), &cfg.input, &cfg.message),
-//         &mut t_enc,
-//     );
-
-//     // 4) dec
-//     let bit: bool = timed_read(
-//         "dec",
-//         || abe.dec(params.clone(), ct, mpk.clone(), fsk.clone(), arith.clone()),
-//         &mut t_dec,
-//     );
-
-//     info!(target: "abe", dec_result = bit, "finished decryption");
-
-//     Ok(())
-// }

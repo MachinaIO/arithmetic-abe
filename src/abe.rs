@@ -117,7 +117,7 @@ impl<
         let plaintexts = inputs
             .iter()
             .flat_map(|input| {
-                assert_eq!(inputs.len(), self.num_eval_slots);
+                assert_eq!(input.len(), self.num_eval_slots);
                 encode_modulo_poly(self.limb_bit_size, &params, input)
             })
             .collect::<Vec<_>>();

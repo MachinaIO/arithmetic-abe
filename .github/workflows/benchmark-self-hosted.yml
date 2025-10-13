@@ -3,18 +3,15 @@ name: Bench
 on:
   workflow_dispatch:
     inputs:
-      param_id:
-        description: "Configuration ID (e.g. 36)"
+      config_path:
+        description: "Path to Configuration File"
         required: true
-        default: "36"
+        default: "secpar_0_height_2.params.toml"
+
       data_id:
         description: "Data ID (e.g. 53)"
         required: true
-        default: "53"
-      height:
-        description: "Height of binary tree"
-        required: true
-        default: "1"
+        default: "0"
 
 env:
   CARGO_TERM_COLOR: always
@@ -113,7 +110,7 @@ jobs:
         run: ls -lah /usr/local/lib | grep OpenFHE
 
       - name: Install abe
-        run: cargo install --path arithmetic-abe/abe
+        run: cargo install --path abe
 
       - name: Verify abe
         run: which abe
@@ -125,13 +122,12 @@ jobs:
         run: |
           mkdir -p logs
 
-          # Run abe with hardcoded config path as requested
+          # Run abe for offline computation with hardcoded config path as requested
           (
-            abe run \
-              --config e2e/dummy.param.toml \
-              -h ${{ github.event.inputs.height }} \
-              -d /tmp/data_${{ github.event.inputs.data_id }}_param_${{ github.event.inputs.param_id }} \
-            2>&1 | tee logs/data_${{ github.event.inputs.data_id }}_param_${{ github.event.inputs.param_id }}.log
+            abe bench-run-offline   \
+              --config abe/run_configs/${{ github.event.inputs.config_path }} \
+              --data-dir data_${{ github.event.inputs.data_id }} \
+            2>&1 | tee logs/data_${{ github.event.inputs.data_id }}.log
           ) &
           pid=$!
           echo "Benchmark PID: $pid"
@@ -151,7 +147,7 @@ jobs:
 
       - name: Run memory profiling
         run: |
-          LOG=logs/data_${{ github.event.inputs.data_id }}_param_${{ github.event.inputs.param_id }}.log
+          LOG=logs/data_${{ github.event.inputs.data_id }}.log
           uv run memory_profile.py --log-file "$LOG"
 
       - name: Upload memory analysis
@@ -163,3 +159,9 @@ jobs:
       - name: Clean up logs
         if: always()
         run: rm -rf logs
+
+      - name: Clean up data
+        if: always()
+        run: rm -rf data_${{ github.event.inputs.data_id }}
+
+    
