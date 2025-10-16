@@ -104,6 +104,7 @@ pub fn bruteforce_params_for_bench_arith_circuit(
                     let params = DCRTPolyParams::new(ring_dim, crt_depth as usize, crt_bits as usize, base_bits);
                     let circuit = ArithmeticCircuit::benchmark_multiplication_tree(&params, limb_bit_size, num_eval_slots.unwrap_or(ring_dim as usize), height,true);
                     log::info!("circuit constructed with crt_depth = {}, log_dim = {}, base_bits = {}, knapsack_size = {}, e_b_log_alpha = {}", crt_depth, log_dim, base_bits, knapsack_size, e_b_log_alpha);
+                    log::info!("circuit size {:?}", circuit.poly_circuit.count_gates_by_type_vec());
                     log::info!("poly circuit non_free_depth {}",circuit.poly_circuit.non_free_depth());
                     match check_correctness(
                         target_secpar,
@@ -417,9 +418,7 @@ fn check_correctness(
     if q_over_4 > e_final.poly_norm.norm {
         // Compute bit lengths of q_over_4 and e_final (after rounding up to integer)
         let q_over_4_bits = {
-            let s = q_over_4
-                .with_scale_round(0, bigdecimal::RoundingMode::Ceiling)
-                .to_string();
+            let s = q_over_4.with_scale_round(0, bigdecimal::RoundingMode::Ceiling).to_string();
             if let Some(n) = BigUint::parse_bytes(s.as_bytes(), 10) {
                 let bytes = n.to_bytes_be();
                 if bytes.is_empty() {
