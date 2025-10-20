@@ -110,7 +110,7 @@ jobs:
       - name: Run memory profiling
         run: |
           LOG=logs/data_${{ github.event.inputs.data_id }}.log
-          uv run memory_profile.py --log-file "$LOG"
+          uv run scripts/memory_profile.py --log-file "$LOG"
 
       - name: Upload memory analysis
         uses: actions/upload-artifact@v4
