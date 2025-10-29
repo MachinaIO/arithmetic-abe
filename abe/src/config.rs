@@ -18,7 +18,8 @@ pub struct RunConfig {
     pub trapdoor_sigma: Option<f64>,
     /// bit size of the base for the gadget vector and decomposition
     pub base_bits: u32,
-    pub limb_bit_size: usize,
+    pub l1_moduli_bits: usize,
+    pub scale: u64,
     pub arith_input_size: usize,
     pub arith_height: u32,
     // #[serde(
@@ -39,6 +40,7 @@ pub struct SimConfig {
     pub log_dim_min: u32,
     pub log_dim_max: u32,
     pub num_eval_slots: Option<usize>,
-    pub limb_bit_size: usize,
+    pub l1_moduli_bits: usize,
+    pub scale: u64,
     pub height: usize,
 }

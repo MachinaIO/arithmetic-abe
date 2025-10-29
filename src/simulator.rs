@@ -3,6 +3,7 @@ pub use mxx::simulator::lattice_estimator::run_lattice_estimator_cli;
 use mxx::{
     arithmetic::circuit::ArithmeticCircuit,
     circuit::PolyCircuit,
+    gadgets::arith::nested_crt::{NestedCrtPoly, NestedCrtPolyContext},
     poly::dcrt::{params::DCRTPolyParams, poly::DCRTPoly},
     simulator::{
         SimulatorContext,
@@ -115,6 +116,114 @@ pub fn bruteforce_params_for_bench_arith_circuit(
                         knapsack_size,
                         e_b_log_alpha,
                         &circuit.poly_circuit,
+                    ) {
+                        Ok(cost) => {
+                            log::info!(
+                                "Found with target_secpar = {}, crt_bits = {}, base_bits = {}, crt_depth = {}, cost = {}",
+                                target_secpar, crt_bits, base_bits, crt_depth,  cost
+                            );
+                            local.push((
+                                cost,
+                                crt_depth,
+                                base_bits,
+                                log_dim,
+                                2.0f64.powf(
+                                    crt_bits as f64 * crt_depth as f64 + e_b_log_alpha as f64,
+                                ),
+                                knapsack_size,
+                            ));
+                            // search smaller crt_depth to continue binary search
+                            if crt_depth == 0 { break; }
+                            hi = crt_depth - 1;
+                        }
+                        Err(e) => {
+                            log::info!(
+                                "Correctness error with target_secpar = {}, crt_bits = {}, base_bits = {}, crt_depth = {}: {}",
+                                target_secpar, crt_bits, base_bits, crt_depth, e
+                            );
+                            // try larger crt_depth
+                            lo = crt_depth + 1;
+                        }
+                    }
+                }
+                local
+            })
+            .collect();
+    outputs
+        .into_iter()
+        .min_by(|x, y| x.0.cmp(&y.0))
+        .map(|outs| (outs.1, outs.2, outs.3, outs.4, outs.5))
+}
+
+// Output (crt_depth, base_bits, log_dim, e_b_sigma, knapsack_size) or None
+pub fn bruteforce_params_for_bench_nested_crt_circuit(
+    target_secpar: u32,
+    crt_bits: u32,
+    crt_depth_range: (u32, u32),
+    base_bits_range: (u32, u32),
+    log_dim_range: (u32, u32),
+    num_eval_slots: Option<usize>,
+    l1_moduli_bits: usize,
+    scale: u64,
+    height: usize,
+    // circuit: PolyCircuit<DCRTPoly>,
+) -> Option<(u32, u32, u32, f64, u32)> {
+    // (cost, crt_depth, base_bits, log_dim, e_b_sigma, knapsack_size)
+    let outputs: Vec<(u32, u32, u32, u32, f64, u32)> =
+        (base_bits_range.0..=base_bits_range.1)
+            .into_par_iter()
+            .flat_map(|base_bits| {
+                let mut local = Vec::<(u32, u32, u32, u32, f64, u32)>::new();
+                let mut lo = crt_depth_range.0;
+                let mut hi = crt_depth_range.1;
+                while lo <= hi {
+                    let crt_depth = lo + ((hi - lo) / 2);
+                    log::info!("base_bits {base_bits} crt_depth {crt_depth}");
+                    let (log_dim, e_b_log_alpha, knapsack_size) = match find_min_ring_dim(
+                        target_secpar,
+                        crt_bits,
+                        crt_depth,
+                        base_bits,
+                        log_dim_range,
+                    ) {
+                        Ok(result) => result,
+                        Err(e) => {
+                            log::info!(
+                                "Security error with target_secpar = {}, crt_bits = {}, base_bits = {}, crt_depth = {}, l1_moduli_bits = {}, height = {}: {}",
+                                target_secpar, crt_bits, base_bits, crt_depth, l1_moduli_bits, height, e
+                            );
+                            // try smaller crt_depth
+                            if crt_depth == 0 { break; }
+                            hi = crt_depth - 1;
+                            continue;
+                        }
+                    };
+                    log::info!(
+                        "Found log_dim = {}, e_b_log_alpha = {}, knapsack_size = {}",
+                        log_dim,
+                        e_b_log_alpha,
+                        knapsack_size
+                    );
+                    let ring_dim = (1 << log_dim) as u32;
+                    let params = DCRTPolyParams::new(ring_dim, crt_depth as usize, crt_bits as usize, base_bits);
+                    let circuit = {
+                        let mut circuit = PolyCircuit::<DCRTPoly>::new();
+                        let ctx = Arc::new(NestedCrtPolyContext::setup(&mut circuit, &params, l1_moduli_bits, scale, num_eval_slots.unwrap_or(ring_dim as usize), true));
+                        NestedCrtPoly::benchmark_multiplication_tree(ctx, &mut circuit, height);
+                        circuit
+                    };
+                    log::info!("circuit constructed with crt_depth = {}, log_dim = {}, base_bits = {}, knapsack_size = {}, e_b_log_alpha = {}", crt_depth, log_dim, base_bits, knapsack_size, e_b_log_alpha);
+                    log::info!("circuit size {:?}", circuit.count_gates_by_type_vec());
+                    log::info!("poly circuit non_free_depth {}",circuit.non_free_depth());
+                    match check_correctness(
+                        target_secpar,
+                        log_dim,
+                        crt_bits,
+                        crt_depth,
+                        base_bits,
+                        knapsack_size,
+                        e_b_log_alpha,
+                        &circuit,
                     ) {
                         Ok(cost) => {
                             log::info!(

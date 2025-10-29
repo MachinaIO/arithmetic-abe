@@ -1,11 +1,12 @@
 target_secpar = 120
-crt_bits = 32
-crt_depth_min = 1
-crt_depth_max = 1
+crt_bits = 24
+crt_depth_min = 20
+crt_depth_max = 60
 base_bits_min = 17
 base_bits_max = 17
 log_dim_min = 15
 log_dim_max = 15
 num_eval_slots = 1
-limb_bit_size = 12
+l1_moduli_bits = 8
+scale = 8
 height = 1

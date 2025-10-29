@@ -5,18 +5,14 @@ use arithmetic_abe::{
     abe::KeyPolicyABE,
     ciphertext::Ciphertext,
     keys::{FuncSK, MasterPK, MasterSK},
-    simulator::bruteforce_params_for_bench_arith_circuit,
+    simulator::bruteforce_params_for_bench_nested_crt_circuit,
 };
 use chrono::Local;
 use clap::{Parser, Subcommand};
 use keccak_asm::Keccak256;
 use mxx::{
-    arithmetic::circuit::ArithmeticCircuit,
     matrix::dcrt_poly::DCRTPolyMatrix,
-    poly::{
-        PolyParams,
-        dcrt::{params::DCRTPolyParams, poly::DCRTPoly},
-    },
+    poly::{PolyParams, dcrt::params::DCRTPolyParams},
     sampler::{
         PolyTrapdoorSampler, hash::DCRTPolyHashSampler, trapdoor::DCRTPolyTrapdoorSampler,
         uniform::DCRTPolyUniformSampler,
@@ -122,12 +118,13 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         log_dim_min,
         log_dim_max,
         num_eval_slots,
-        limb_bit_size,
+        l1_moduli_bits,
+        scale,
         height,
     } = config;
 
     log_mem(format!(
-        "Starting benchmark parameter search: target_secpar={}, crt_bits={}, crt_depth_range=({}-{}), base_bits_range=({}-{}), log_dim_range=({}-{}), num_eval_slots={:?}, limb_bit_size={}, height={}, config_prefix={}",
+        "Starting benchmark parameter search: target_secpar={}, crt_bits={}, crt_depth_range=({}-{}), base_bits_range=({}-{}), log_dim_range=({}-{}), num_eval_slots={:?}, l1_moduli_bits={}, scale = {}, height={}, config_prefix={}",
         target_secpar,
         crt_bits,
         crt_depth_min,
@@ -137,19 +134,21 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         log_dim_min,
         log_dim_max,
         num_eval_slots,
-        limb_bit_size,
+        l1_moduli_bits,
+        scale,
         height,
         config_prefix
     ));
 
-    let params = bruteforce_params_for_bench_arith_circuit(
+    let params = bruteforce_params_for_bench_nested_crt_circuit(
         target_secpar,
         crt_bits,
         (crt_depth_min, crt_depth_max),
         (base_bits_min, base_bits_max),
         (log_dim_min, log_dim_max),
         config.num_eval_slots,
-        limb_bit_size,
+        l1_moduli_bits,
+        scale,
         height,
     )
     .context("unable to find parameters for benchmark arithmetic circuit")?;
@@ -180,7 +179,8 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         trapdoor_sigma: Some(4.578),
         base_bits,
         num_eval_slots: config.num_eval_slots,
-        limb_bit_size,
+        l1_moduli_bits,
+        scale,
         arith_input_size,
         arith_height,
     };
@@ -215,7 +215,8 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         DCRTPolyTrapdoorSampler,
         DCRTPolyUniformSampler,
     >::new(
-        config.limb_bit_size,
+        config.l1_moduli_bits,
+        config.scale,
         &params,
         config.num_eval_slots,
         config.knapsack_size,
@@ -224,18 +225,8 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     );
     let mut t_setup = Duration::ZERO;
     let mut t_keygen = Duration::ZERO;
-    let num_eval_slots = config.num_eval_slots.unwrap_or(params.ring_dimension() as usize);
 
     log_mem("starting KeyPolicy ABE");
-    log_mem("start building arithmetic circuit");
-    let arith_circuit = ArithmeticCircuit::<DCRTPoly>::benchmark_multiplication_tree(
-        &params,
-        config.limb_bit_size,
-        num_eval_slots,
-        config.arith_height as usize,
-        false,
-    );
-    log_mem("finished building arithmetic circuit");
 
     // 1) setup
     log_mem("starting setup");
@@ -253,7 +244,15 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     log_mem("starting keygen");
     let fsk: FuncSK<DCRTPolyMatrix> = timed_read_async(
         "keygen",
-        || abe.keygen(params.clone(), mpk.clone(), msk.clone(), arith_circuit, dir_path.clone()),
+        || {
+            abe.keygen(
+                params.clone(),
+                mpk.clone(),
+                msk.clone(),
+                config.arith_height,
+                dir_path.clone(),
+            )
+        },
         &mut t_keygen,
     )
     .await;
@@ -282,7 +281,8 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         DCRTPolyTrapdoorSampler,
         DCRTPolyUniformSampler,
     >::new(
-        config.limb_bit_size,
+        config.l1_moduli_bits,
+        config.scale,
         &params,
         config.num_eval_slots,
         config.knapsack_size,
@@ -296,15 +296,6 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     let num_eval_slots = config.num_eval_slots.unwrap_or(params.ring_dimension() as usize);
 
     log_mem("starting KeyPolicy ABE");
-    log_mem("start building arithmetic circuit");
-    let arith_circuit = ArithmeticCircuit::<DCRTPoly>::benchmark_multiplication_tree(
-        &params,
-        config.limb_bit_size,
-        num_eval_slots,
-        config.arith_height as usize,
-        false,
-    );
-    log_mem("finished building arithmetic circuit");
 
     // 3) enc
     log_mem("starting enc");
@@ -357,8 +348,11 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         },
         &mut t_read_fsk,
     );
-    let bit: bool =
-        timed_read("dec", || abe.dec(params.clone(), ct, mpk, fsk, arith_circuit), &mut t_dec);
+    let bit: bool = timed_read(
+        "dec",
+        || abe.dec(params.clone(), ct, mpk, fsk, config.arith_height),
+        &mut t_dec,
+    );
     log_mem(format!("finished decryption: result={}", bit));
     Ok(())
 }

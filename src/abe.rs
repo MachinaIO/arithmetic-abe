@@ -2,18 +2,21 @@ use crate::{
     ciphertext::Ciphertext,
     keys::{FuncSK, MasterPK, MasterSK},
 };
+use log::info;
 use mxx::{
-    arithmetic::circuit::ArithmeticCircuit,
+    // arithmetic::circuit::ArithmeticCircuit,
     bgg::{
         encoding::BggEncoding,
         sampler::{BGGEncodingSampler, BGGPublicKeySampler},
     },
+    circuit::PolyCircuit,
     element::PolyElem,
-    gadgets::crt::encode_modulo_poly,
-    lookup::lwe_eval::LweBggEncodingPltEvaluator,
+    gadgets::arith::nested_crt::{NestedCrtPoly, NestedCrtPolyContext, encode_nested_crt_poly},
+    lookup::lwe_eval::{LweBggEncodingPltEvaluator, LweBggPubKeyEvaluator},
     matrix::PolyMatrix,
     poly::{Poly, PolyParams},
     sampler::{DistType, PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler},
+    storage::write::{init_storage_system, wait_for_all_writes},
 };
 use num_bigint::BigUint;
 use std::{marker::PhantomData, path::PathBuf, sync::Arc};
@@ -27,8 +30,9 @@ pub struct KeyPolicyABE<
     SU: PolyUniformSampler<M = M> + Send + Sync,
 > {
     pub e_b_sigma: f64,
-    pub limb_bit_size: usize,
-    pub num_crt_limbs: usize,
+    pub l1_moduli_bits: usize,
+    pub l1_moduli_depth: usize,
+    pub scale: u64,
     pub crt_depth: usize,
     pub num_eval_slots: usize,
     pub knapsack_size: Option<usize>,
@@ -45,7 +49,8 @@ impl<
 > KeyPolicyABE<M, SH, ST, SU>
 {
     pub fn new(
-        limb_bit_size: usize,
+        l1_moduli_bits: usize,
+        scale: u64,
         params: &<M::P as Poly>::Params,
         num_eval_slots: Option<usize>,
         knapsack_size: Option<usize>,
@@ -53,11 +58,12 @@ impl<
         trapdoor_sampler: ST,
     ) -> Self {
         let (_, crt_bits, crt_depth) = params.to_crt();
-        let num_crt_limbs = crt_bits.div_ceil(limb_bit_size);
+        let l1_moduli_depth = (2 * crt_bits).div_ceil(l1_moduli_bits);
         let num_eval_slots = num_eval_slots.unwrap_or(params.ring_dimension() as usize);
         Self {
-            limb_bit_size,
-            num_crt_limbs,
+            l1_moduli_bits,
+            l1_moduli_depth,
+            scale,
             crt_depth,
             num_eval_slots,
             knapsack_size,
@@ -118,11 +124,10 @@ impl<
             .iter()
             .flat_map(|input| {
                 assert_eq!(input.len(), self.num_eval_slots);
-                encode_modulo_poly(self.limb_bit_size, &params, input)
+                encode_nested_crt_poly(self.l1_moduli_bits, &params, input)
             })
             .collect::<Vec<_>>();
-        let num_given_input_polys =
-            num_modulo_poly::<M::P>(self.limb_bit_size, &params, num_inputs);
+        let num_given_input_polys = num_inputs * self.l1_moduli_depth;
         let reveal_plaintexts = vec![true; num_given_input_polys + 1];
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, 1);
         let pubkeys = bgg_pubkey_sampler.sample(&params, TAG_BGG_PUBKEY, &reveal_plaintexts);
@@ -188,20 +193,41 @@ impl<
         params: <M::P as Poly>::Params,
         mpk: MasterPK<M>,
         msk: MasterSK<M, ST>,
-        arith_circuit: ArithmeticCircuit<M::P>,
+        height: u32,
         dir_path: PathBuf,
     ) -> FuncSK<M> {
-        let result = arith_circuit
-            .evaluate_with_bgg_pubkey::<M, SH, ST, SU>(
+        init_storage_system();
+        let circuit = {
+            let mut circuit = PolyCircuit::<M::P>::new();
+            let ctx = Arc::new(NestedCrtPolyContext::setup(
+                &mut circuit,
                 &params,
-                mpk.seed,
-                dir_path.clone(),
-                1,
-                mpk.b_matrix.clone(),
-                msk.b_trapdoor.clone(),
-                self.trapdoor_sampler.clone(),
-            )
-            .await;
+                self.l1_moduli_bits,
+                self.scale,
+                self.num_eval_slots,
+                false,
+            ));
+            NestedCrtPoly::benchmark_multiplication_tree(ctx, &mut circuit, height as usize);
+            circuit
+        };
+        let plt_evaluator = LweBggPubKeyEvaluator::<M, SH, ST>::new(
+            mpk.seed,
+            self.trapdoor_sampler.clone(),
+            mpk.b_matrix.clone(),
+            msk.b_trapdoor.clone(),
+            dir_path.clone(),
+        );
+        let num_inputs =
+            1usize.checked_shl(height as u32).expect("height is too large to represent 2^h inputs");
+        let num_given_input_polys = num_inputs * self.l1_moduli_depth;
+        let reveal_plaintexts = vec![true; num_given_input_polys + 1];
+        let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, 1);
+        let pubkeys = bgg_pubkey_sampler.sample(&params, TAG_BGG_PUBKEY, &reveal_plaintexts);
+        let result = circuit.eval(&params, &pubkeys[0], &pubkeys[1..], Some(plt_evaluator));
+        info!("finished evaluation of pubkeys");
+        wait_for_all_writes(dir_path.clone()).await.unwrap();
+        info!("finished write files");
+
         let a_f = result[0].clone().matrix;
         let u_f = self.trapdoor_sampler.preimage_extend(
             &params,
@@ -220,28 +246,31 @@ impl<
         ct: Ciphertext<M>,
         mpk: MasterPK<M>,
         fsk: FuncSK<M>,
-        arith_circuit: ArithmeticCircuit<M::P>,
+        height: u32,
     ) -> bool {
+        init_storage_system();
+        let circuit = {
+            let mut circuit = PolyCircuit::<M::P>::new();
+            let ctx = Arc::new(NestedCrtPolyContext::setup(
+                &mut circuit,
+                &params,
+                self.l1_moduli_bits,
+                self.scale,
+                self.num_eval_slots,
+                false,
+            ));
+            NestedCrtPoly::benchmark_multiplication_tree(ctx, &mut circuit, height as usize);
+            circuit
+        };
         let encodings = &ct.bgg_encodings[..];
         let dir_path: PathBuf = fsk.dir_path;
         let bgg_evaluator =
             LweBggEncodingPltEvaluator::<M, SH>::new(mpk.seed, dir_path, ct.c_b.clone());
-        let result = arith_circuit.poly_circuit.eval(
-            &params,
-            &encodings[0],
-            &encodings[1..],
-            Some(bgg_evaluator),
-        );
+        let result = circuit.eval(&params, &encodings[0], &encodings[1..], Some(bgg_evaluator));
         // 5. Let `c_f := s^T*A_f + e_{c_f}` in $\mathcal{R}_{q}^{1 \times m}$
         // be the BGG+ encoding corresponding to the output wire of `poly_circuit`.
         let v = ct.c_b.concat_columns(&[&result[0].vector]) * fsk.u_f;
         let z = ct.c_u - &v.get_row(0)[0];
         z.extract_bits_with_threshold(&params)[0]
     }
-}
-
-fn num_modulo_poly<P: Poly>(limb_bit_size: usize, params: &P::Params, num_inputs: usize) -> usize {
-    let (_, crt_bits, _) = params.to_crt();
-    let num_limbs_per_slot = crt_bits.div_ceil(limb_bit_size);
-    num_inputs * num_limbs_per_slot
 }
