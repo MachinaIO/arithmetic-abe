@@ -86,19 +86,14 @@ jobs:
 
           LOGFILE=logs/data_${{ github.event.inputs.data_id }}.log
 
-          # Run abe for offline computation with hardcoded config path as requested
-          echo "=== bench-run-offline ===" | tee "$LOGFILE"
-          abe bench-run-offline   \
-            --config abe/run_configs/${{ github.event.inputs.config_path }} \
-            --data-dir data_${{ github.event.inputs.data_id }} \
-          2>&1 | tee -a "$LOGFILE"
-
-          # Run abe for online computation reusing the generated keys/data
-          echo "=== bench-run-online ===" | tee -a "$LOGFILE"
-          abe bench-run-online    \
-            --config abe/run_configs/${{ github.event.inputs.config_path }} \
-            --data-dir data_${{ github.event.inputs.data_id }} \
-          2>&1 | tee -a "$LOGFILE"
+          {
+            abe bench-run-offline \
+              --config abe/run_configs/${{ github.event.inputs.config_path }} \
+              --data-dir data_${{ github.event.inputs.data_id }} &&
+            abe bench-run-online  \
+              --config abe/run_configs/${{ github.event.inputs.config_path }} \
+              --data-dir data_${{ github.event.inputs.data_id }}
+          } 2>&1 | tee -a "$LOGFILE"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
