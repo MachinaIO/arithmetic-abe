@@ -39,6 +39,6 @@ pub struct SimConfig {
     pub log_dim_min: u32,
     pub log_dim_max: u32,
     pub p_moduli_bits: usize,
-    pub scale: u64,
+    pub scale_bits: u32,
     pub height: usize,
 }

@@ -7,5 +7,5 @@ base_bits_max = 19
 log_dim_min = 13
 log_dim_max = 14
 p_moduli_bits = 6
-scale = 10
+scale_bits = 8
 height = 1

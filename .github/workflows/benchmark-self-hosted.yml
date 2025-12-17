@@ -6,7 +6,7 @@ on:
       config_path:
         description: "Path to Configuration File"
         required: true
-        default: "secpar_0_height_2.params.toml"
+        default: "secpar_0_height_1_p_3.params.toml"
 
       data_id:
         description: "Data ID (e.g. 53)"

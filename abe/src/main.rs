@@ -118,12 +118,12 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         log_dim_min,
         log_dim_max,
         p_moduli_bits,
-        scale,
+        scale_bits,
         height,
     } = config;
 
     log_mem(format!(
-        "Starting benchmark parameter search: target_secpar={}, crt_bits={}, crt_depth_range=({}-{}), base_bits_range=({}-{}), log_dim_range=({}-{}), p_moduli_bits={}, scale = {}, height={}, config_prefix={}",
+        "Starting benchmark parameter search: target_secpar={}, crt_bits={}, crt_depth_range=({}-{}), base_bits_range=({}-{}), log_dim_range=({}-{}), p_moduli_bits={}, scale_bits = {}, height={}, config_prefix={}",
         target_secpar,
         crt_bits,
         crt_depth_min,
@@ -133,7 +133,7 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         log_dim_min,
         log_dim_max,
         p_moduli_bits,
-        scale,
+        scale_bits,
         height,
         config_prefix
     ));
@@ -145,7 +145,7 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         (base_bits_min, base_bits_max),
         (log_dim_min, log_dim_max),
         p_moduli_bits,
-        scale,
+        scale_bits,
         height,
     )
     .context("unable to find parameters for benchmark arithmetic circuit")?;
@@ -176,7 +176,7 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         trapdoor_sigma: Some(4.578),
         base_bits,
         p_moduli_bits,
-        scale,
+        scale: 1 << scale_bits,
         arith_input_size,
         arith_height,
     };

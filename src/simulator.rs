@@ -162,7 +162,7 @@ pub fn bruteforce_params_for_bench_nested_crt_circuit(
     base_bits_range: (u32, u32),
     log_dim_range: (u32, u32),
     p_moduli_bits: usize,
-    scale: u64,
+    scale_bits: u32,
     height: usize,
     // circuit: PolyCircuit<DCRTPoly>,
 ) -> Option<(u32, u32, u32, f64, u32)> {
@@ -207,6 +207,7 @@ pub fn bruteforce_params_for_bench_nested_crt_circuit(
                     log::info!("params constructed with crt_depth = {}, log_dim = {}, base_bits = {}, knapsack_size = {}, e_b_log_alpha = {}", crt_depth, log_dim, base_bits, knapsack_size, e_b_log_alpha);
                     let circuit = {
                         let mut circuit = PolyCircuit::<DCRTPoly>::new();
+                        let scale = 1<<scale_bits;
                         let ctx = Arc::new(NestedRnsPolyContext::setup(&mut circuit, &params, p_moduli_bits, scale, true));
                         log::info!("ctx constructed with crt_depth = {}, log_dim = {}, base_bits = {}, knapsack_size = {}, e_b_log_alpha = {}", crt_depth, log_dim, base_bits, knapsack_size, e_b_log_alpha);
                         NestedRnsPoly::benchmark_multiplication_tree(ctx, &params,&mut circuit, height);
