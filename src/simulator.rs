@@ -14,11 +14,8 @@ use mxx::{
     utils::log_mem,
 };
 use num_bigint::BigUint;
-use rayon::{join, prelude::*};
-use std::sync::{
-    Arc,
-    atomic::{AtomicU32, Ordering},
-};
+use rayon::prelude::*;
+use std::sync::Arc;
 use thiserror::Error;
 // Logging (replaces println!)
 // Configure a logger (e.g., env_logger) in the binary/tests to see output.
@@ -49,8 +46,8 @@ pub enum SimulatorError {
         "good log_alpha not found for target_secpar={target_secpar}, ring_dim={ring_dim}, log_q={log_q}, m={m}"
     )]
     LogAlphaNotFound { target_secpar: u32, ring_dim: BigUint, log_q: u32, m: BigUint },
-    #[error("correctness does not hold: error={e}, q_over_4={q_over_4}")]
-    NotCorrect { e: BigDecimal, q_over_4: BigDecimal },
+    #[error("correctness does not hold: error_bits={e_bits}, q_over_4_bits={q_over_4_bits}")]
+    NotCorrect { e_bits: usize, q_over_4_bits: usize },
 }
 
 // Output (crt_depth, base_bits, log_dim, e_b_sigma, knapsack_size) or None
@@ -103,6 +100,7 @@ pub fn bruteforce_params_for_bench_arith_circuit(
                     );
                     let ring_dim = (1 << log_dim) as u32;
                     let params = DCRTPolyParams::new(ring_dim, crt_depth as usize, crt_bits as usize, base_bits);
+                    log::info!("params constructed with crt_depth = {}, log_dim = {}, base_bits = {}, knapsack_size = {}, e_b_log_alpha = {}", crt_depth, log_dim, base_bits, knapsack_size, e_b_log_alpha);
                     let circuit = ArithmeticCircuit::benchmark_multiplication_tree(&params, limb_bit_size, num_eval_slots.unwrap_or(ring_dim as usize), height,true);
                     log::info!("circuit constructed with crt_depth = {}, log_dim = {}, base_bits = {}, knapsack_size = {}, e_b_log_alpha = {}", crt_depth, log_dim, base_bits, knapsack_size, e_b_log_alpha);
                     log::info!("circuit size {:?}", circuit.poly_circuit.count_gates_by_type_vec());
@@ -206,9 +204,11 @@ pub fn bruteforce_params_for_bench_nested_crt_circuit(
                     );
                     let ring_dim = (1 << log_dim) as u32;
                     let params = DCRTPolyParams::new(ring_dim, crt_depth as usize, crt_bits as usize, base_bits);
+                    log::info!("params constructed with crt_depth = {}, log_dim = {}, base_bits = {}, knapsack_size = {}, e_b_log_alpha = {}", crt_depth, log_dim, base_bits, knapsack_size, e_b_log_alpha);
                     let circuit = {
                         let mut circuit = PolyCircuit::<DCRTPoly>::new();
                         let ctx = Arc::new(NestedCrtPolyContext::setup(&mut circuit, &params, l1_moduli_bits, scale, num_eval_slots.unwrap_or(ring_dim as usize), true));
+                        log::info!("ctx constructed with crt_depth = {}, log_dim = {}, base_bits = {}, knapsack_size = {}, e_b_log_alpha = {}", crt_depth, log_dim, base_bits, knapsack_size, e_b_log_alpha);
                         NestedCrtPoly::benchmark_multiplication_tree(ctx, &mut circuit, height);
                         circuit
                     };
@@ -315,102 +315,23 @@ fn check_security(
     base_bits: u32,
 ) -> Result<(i64, u32), SimulatorError> {
     let log_q = crt_bits * crt_depth;
-    let q = BigUint::from(2u32).pow(log_q);
     let m_g = crt_bits.div_ceil(base_bits) * crt_depth;
     let m_b = m_g + 2;
     // The column size of the matrix B (sampled with a trapdoor) is m_b; however, one column is an
     // identity polynomial, so we need to ignore one column. Additionally, one more uniformly
     // random matrix is used for encrypting a message in ABE; thus the total column size for
     // ring-LWE is m_b - 1 + 1 = m_b.
-    let (log_alpha_res, knapsack_res) = join(
-        || find_log_alpha_for_ring_lwe(target_secpar, ring_dim, log_q, &BigUint::from(m_b)),
-        || find_knapsack_size(target_secpar, ring_dim, &q, m_b - 1),
-    );
+    let log_alpha_res =
+        find_log_alpha_for_ring_lwe(target_secpar, ring_dim, log_q, &BigUint::from(m_b));
+    // join(
+    //     || find_log_alpha_for_ring_lwe(target_secpar, ring_dim, log_q, &BigUint::from(m_b)),
+    //     // || find_knapsack_size(target_secpar, ring_dim, &q, m_b - 1),
+    // );
     let log_alpha = log_alpha_res?;
     log::debug!("found log_alpha_res = {log_alpha}");
-    let knapsack_size = knapsack_res?;
+    let knapsack_size = m_b - 1;
     log::debug!("found knapsack_size = {knapsack_size}");
     Ok((log_alpha, knapsack_size))
-}
-
-/// Returns the smallest `knapsack_size` in [1, max_knapsack_size] whose estimated
-/// security is at least `target_secpar`, or an error if estimation fails or none found.
-/// - `target_secpar`: required minimum security parameter.
-/// - `ring_dim`: base ring dimension.
-/// - `q`: modulus (as BigUint).
-/// - `max_knapsack_size`: upper bound to search (inclusive).
-fn find_knapsack_size(
-    target_secpar: u32,
-    ring_dim: &BigUint,
-    q: &BigUint,
-    max_knapsack_size: u32,
-) -> Result<u32, SimulatorError> {
-    if max_knapsack_size < 2 {
-        return Err(SimulatorError::KnapsackNotFound {
-            target_secpar,
-            ring_dim: ring_dim.clone(),
-            max_knapsack_size,
-            q: q.clone(),
-        });
-    }
-
-    let best = AtomicU32::new(0);
-
-    (2..=max_knapsack_size).into_par_iter().try_for_each(
-        |knapsack_size| -> Result<(), SimulatorError> {
-            let current_best = best.load(Ordering::Relaxed);
-            if current_best != 0 && knapsack_size >= current_best {
-                return Ok(());
-            }
-
-            // Effective LWE dimension n = ring_dim * knapsack_size - ring_dim
-            let n = ring_dim * BigUint::from(knapsack_size) - ring_dim;
-            // s_dist = Ternary, e_dist = Ternary, m = n, exact = false (rough)
-            let secpar = run_lattice_estimator_cli(
-                &n,
-                q,
-                &Distribution::Ternary,
-                &Distribution::Ternary,
-                Some(&n),
-                false,
-            )?;
-            log::debug!("called estimator {secpar} in find_knapsack_size for {knapsack_size}");
-
-            if secpar as u32 >= target_secpar {
-                let mut observed = best.load(Ordering::Acquire);
-                while observed == 0 || knapsack_size < observed {
-                    match best.compare_exchange(
-                        observed,
-                        knapsack_size,
-                        Ordering::AcqRel,
-                        Ordering::Acquire,
-                    ) {
-                        Ok(_) => break,
-                        Err(actual) => {
-                            if actual != 0 && knapsack_size >= actual {
-                                break;
-                            }
-                            observed = actual;
-                        }
-                    }
-                }
-            }
-
-            Ok(())
-        },
-    )?;
-
-    let best_value = best.load(Ordering::Relaxed);
-    if best_value != 0 {
-        Ok(best_value)
-    } else {
-        Err(SimulatorError::KnapsackNotFound {
-            target_secpar,
-            ring_dim: ring_dim.clone(),
-            max_knapsack_size,
-            q: q.clone(),
-        })
-    }
 }
 
 /// Binary-search for the smallest integer `log_alpha` in [-log_q, -1] such that
@@ -428,7 +349,7 @@ fn find_log_alpha_for_ring_lwe(
 ) -> Result<i64, SimulatorError> {
     // q = 2^{log_q}
     let q = BigUint::from(1u8) << (log_q as usize);
-
+    let q_dec = BigDecimal::from_biguint(q.clone(), 0);
     // Search bounds (inclusive) over integer log_alpha.
     let mut lo: i64 = -(log_q as i64);
     let mut hi: i64 = 5 - (log_q as i64);
@@ -440,7 +361,10 @@ fn find_log_alpha_for_ring_lwe(
         // alpha = sigma/q = 2^{log_alpha}
         let alpha = 2f64.powi(mid as i32); // safe for practical parameter sizes
 
-        let e_dist = Distribution::DiscreteGaussianAlpha { alpha, mean: None, n: None };
+        let stddev = &q_dec * BigDecimal::from_f64(alpha).unwrap();
+        let e_dist =
+            Distribution::DiscreteGaussian { stddev: stddev.to_string(), mean: None, n: None };
+        // DiscreteGaussianAlpha { alpha, mean: None, n: None };
 
         // s_dist = Ternary, m = provided, rough estimation
         let secpar = run_lattice_estimator_cli(
@@ -471,6 +395,26 @@ fn find_log_alpha_for_ring_lwe(
     })
 }
 
+// Compute 2^exponent exactly as a BigDecimal to avoid intermediate f64 overflow.
+fn pow_two_bigdecimal(exponent: i64) -> BigDecimal {
+    if exponent == 0 {
+        return BigDecimal::one();
+    }
+    let mut result = BigDecimal::one();
+    let mut base = BigDecimal::from(2u32);
+    let mut exp = exponent.unsigned_abs();
+    while exp > 0 {
+        if exp & 1 == 1 {
+            result = result * &base;
+        }
+        exp >>= 1;
+        if exp > 0 {
+            base = &base * &base;
+        }
+    }
+    if exponent >= 0 { result } else { BigDecimal::one() / result }
+}
+
 fn check_correctness(
     target_secpar: u32,
     log_dim: u32,
@@ -487,7 +431,7 @@ fn check_correctness(
     let q = BigUint::from(2u32).pow(log_q);
     let m_g = (crt_bits.div_ceil(base_bits) * crt_depth) as usize;
     let m_b = m_g + 2;
-    let e_b_sigma = BigDecimal::from_f64(2f64.powf((log_q as i64 - e_b_log_alpha) as f64)).unwrap();
+    let e_b_sigma = pow_two_bigdecimal(i64::from(log_q) - e_b_log_alpha);
     let secpar_sqrt = BigDecimal::from_u32(target_secpar).unwrap().sqrt().unwrap();
     let ring_dim_sqrt = BigDecimal::from_biguint(ring_dim.clone(), 0).sqrt().unwrap();
     let base = BigDecimal::from_biguint((BigUint::from(1u32)) << base_bits, 0);
@@ -514,7 +458,63 @@ fn check_correctness(
         .max_by(|a, b| a.h_norm.poly_norm.norm.cmp(&b.h_norm.poly_norm.norm))
         .unwrap();
     let (max_h_top, max_h_bottom) = max_out_wire.h_norm.split_rows(m_b);
+    let max_h_top_bits = {
+        let s = max_h_top
+            .poly_norm
+            .norm
+            .with_scale_round(0, bigdecimal::RoundingMode::Ceiling)
+            .to_string();
+        if let Some(n) = BigUint::parse_bytes(s.as_bytes(), 10) {
+            let bytes = n.to_bytes_be();
+            if bytes.is_empty() {
+                0usize
+            } else {
+                (bytes.len() - 1) * 8 + (8 - bytes[0].leading_zeros() as usize)
+            }
+        } else {
+            0usize
+        }
+    };
+    log::info!("max_h_top_bits bits {}", max_h_top_bits);
+
+    let max_h_bottom_bits = {
+        let s = max_h_bottom
+            .poly_norm
+            .norm
+            .with_scale_round(0, bigdecimal::RoundingMode::Ceiling)
+            .to_string();
+        if let Some(n) = BigUint::parse_bytes(s.as_bytes(), 10) {
+            let bytes = n.to_bytes_be();
+            if bytes.is_empty() {
+                0usize
+            } else {
+                (bytes.len() - 1) * 8 + (8 - bytes[0].leading_zeros() as usize)
+            }
+        } else {
+            0usize
+        }
+    };
+    log::info!("max_h_bottom_bits bits {}", max_h_bottom_bits);
     let e_after_eval = &e_b * max_h_top + e_a * max_h_bottom;
+    let e_after_eval_bits = {
+        let s = e_after_eval
+            .poly_norm
+            .norm
+            .with_scale_round(0, bigdecimal::RoundingMode::Ceiling)
+            .to_string();
+        if let Some(n) = BigUint::parse_bytes(s.as_bytes(), 10) {
+            let bytes = n.to_bytes_be();
+            if bytes.is_empty() {
+                0usize
+            } else {
+                (bytes.len() - 1) * 8 + (8 - bytes[0].leading_zeros() as usize)
+            }
+        } else {
+            0usize
+        }
+    };
+    log::info!("e_after_eval_bits bits {}", e_after_eval_bits);
+
     let plt_eval = NormPltLweEvaluator::new(sim_ctx.clone(), input_size);
     let mut preimage_norm_top = plt_eval.preimage1_norm.clone();
     preimage_norm_top.nrow = m_b;
@@ -523,44 +523,76 @@ fn check_correctness(
     preimage_norm_bottom.ncol = 1;
     let e_u = PolyMatrixNorm::sample_gauss(sim_ctx.clone(), 1, 1, e_b_sigma);
     let e_final = &e_b * preimage_norm_top + e_after_eval * preimage_norm_bottom + e_u;
+    let e_final_bits = {
+        let s = e_final
+            .poly_norm
+            .norm
+            .with_scale_round(0, bigdecimal::RoundingMode::Ceiling)
+            .to_string();
+        if let Some(n) = BigUint::parse_bytes(s.as_bytes(), 10) {
+            let bytes = n.to_bytes_be();
+            if bytes.is_empty() {
+                0usize
+            } else {
+                (bytes.len() - 1) * 8 + (8 - bytes[0].leading_zeros() as usize)
+            }
+        } else {
+            0usize
+        }
+    };
+    log::info!("e_final_bits bits {}", e_final_bits);
+
     let q_over_4 = BigDecimal::from_biguint(q, 0) / BigDecimal::from_u32(4).unwrap();
+    let q_over_4_bits = {
+        let s = q_over_4.with_scale_round(0, bigdecimal::RoundingMode::Ceiling).to_string();
+        if let Some(n) = BigUint::parse_bytes(s.as_bytes(), 10) {
+            let bytes = n.to_bytes_be();
+            if bytes.is_empty() {
+                0usize
+            } else {
+                (bytes.len() - 1) * 8 + (8 - bytes[0].leading_zeros() as usize)
+            }
+        } else {
+            0usize
+        }
+    };
     if q_over_4 > e_final.poly_norm.norm {
         // Compute bit lengths of q_over_4 and e_final (after rounding up to integer)
-        let q_over_4_bits = {
-            let s = q_over_4.with_scale_round(0, bigdecimal::RoundingMode::Ceiling).to_string();
-            if let Some(n) = BigUint::parse_bytes(s.as_bytes(), 10) {
-                let bytes = n.to_bytes_be();
-                if bytes.is_empty() {
-                    0usize
-                } else {
-                    (bytes.len() - 1) * 8 + (8 - bytes[0].leading_zeros() as usize)
-                }
-            } else {
-                0usize
-            }
-        };
-        let e_final_bits = {
-            let s = e_final
-                .poly_norm
-                .norm
-                .with_scale_round(0, bigdecimal::RoundingMode::Ceiling)
-                .to_string();
-            if let Some(n) = BigUint::parse_bytes(s.as_bytes(), 10) {
-                let bytes = n.to_bytes_be();
-                if bytes.is_empty() {
-                    0usize
-                } else {
-                    (bytes.len() - 1) * 8 + (8 - bytes[0].leading_zeros() as usize)
-                }
-            } else {
-                0usize
-            }
-        };
+        // let q_over_4_bits = {
+        //     let s = q_over_4.with_scale_round(0, bigdecimal::RoundingMode::Ceiling).to_string();
+        //     if let Some(n) = BigUint::parse_bytes(s.as_bytes(), 10) {
+        //         let bytes = n.to_bytes_be();
+        //         if bytes.is_empty() {
+        //             0usize
+        //         } else {
+        //             (bytes.len() - 1) * 8 + (8 - bytes[0].leading_zeros() as usize)
+        //         }
+        //     } else {
+        //         0usize
+        //     }
+        // };
+        // let e_final_bits = {
+        //     let s = e_final
+        //         .poly_norm
+        //         .norm
+        //         .with_scale_round(0, bigdecimal::RoundingMode::Ceiling)
+        //         .to_string();
+        //     if let Some(n) = BigUint::parse_bytes(s.as_bytes(), 10) {
+        //         let bytes = n.to_bytes_be();
+        //         if bytes.is_empty() {
+        //             0usize
+        //         } else {
+        //             (bytes.len() - 1) * 8 + (8 - bytes[0].leading_zeros() as usize)
+        //         }
+        //     } else {
+        //         0usize
+        //     }
+        // };
 
         log_mem(format!("q_over_4_bits: {}, e_final_bits: {}", q_over_4_bits, e_final_bits));
         Ok(log_dim * m_g as u32)
     } else {
-        Err(SimulatorError::NotCorrect { e: e_final.poly_norm.norm, q_over_4 })
+        Err(SimulatorError::NotCorrect { e_bits: e_final_bits, q_over_4_bits })
     }
 }
 

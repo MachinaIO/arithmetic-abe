@@ -16,6 +16,10 @@ bigdecimal = { version = "0.4" }
 rayon = "1.10"
 log = "0.4"
 
+[patch."https://github.com/MachinaIO/openfhe-rs.git"]
+openfhe = { git = "https://github.com/MachinaIO//openfhe-rs.git", branch = "feat/new_funcs_for_prf" }
+
+
 [profile.dev]
 debug = "line-tables-only"
 split-debuginfo = "unpacked"
