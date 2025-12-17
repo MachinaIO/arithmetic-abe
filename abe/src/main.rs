@@ -12,7 +12,7 @@ use clap::{Parser, Subcommand};
 use keccak_asm::Keccak256;
 use mxx::{
     matrix::dcrt_poly::DCRTPolyMatrix,
-    poly::{PolyParams, dcrt::params::DCRTPolyParams},
+    poly::dcrt::params::DCRTPolyParams,
     sampler::{
         PolyTrapdoorSampler, hash::DCRTPolyHashSampler, trapdoor::DCRTPolyTrapdoorSampler,
         uniform::DCRTPolyUniformSampler,
@@ -117,14 +117,13 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         base_bits_max,
         log_dim_min,
         log_dim_max,
-        num_eval_slots,
-        l1_moduli_bits,
+        p_moduli_bits,
         scale,
         height,
     } = config;
 
     log_mem(format!(
-        "Starting benchmark parameter search: target_secpar={}, crt_bits={}, crt_depth_range=({}-{}), base_bits_range=({}-{}), log_dim_range=({}-{}), num_eval_slots={:?}, l1_moduli_bits={}, scale = {}, height={}, config_prefix={}",
+        "Starting benchmark parameter search: target_secpar={}, crt_bits={}, crt_depth_range=({}-{}), base_bits_range=({}-{}), log_dim_range=({}-{}), p_moduli_bits={}, scale = {}, height={}, config_prefix={}",
         target_secpar,
         crt_bits,
         crt_depth_min,
@@ -133,8 +132,7 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         base_bits_max,
         log_dim_min,
         log_dim_max,
-        num_eval_slots,
-        l1_moduli_bits,
+        p_moduli_bits,
         scale,
         height,
         config_prefix
@@ -146,8 +144,7 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         (crt_depth_min, crt_depth_max),
         (base_bits_min, base_bits_max),
         (log_dim_min, log_dim_max),
-        config.num_eval_slots,
-        l1_moduli_bits,
+        p_moduli_bits,
         scale,
         height,
     )
@@ -178,8 +175,7 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         e_b_sigma,
         trapdoor_sigma: Some(4.578),
         base_bits,
-        num_eval_slots: config.num_eval_slots,
-        l1_moduli_bits,
+        p_moduli_bits,
         scale,
         arith_input_size,
         arith_height,
@@ -215,10 +211,9 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         DCRTPolyTrapdoorSampler,
         DCRTPolyUniformSampler,
     >::new(
-        config.l1_moduli_bits,
+        config.p_moduli_bits,
         config.scale,
         &params,
-        config.num_eval_slots,
         config.knapsack_size,
         config.e_b_sigma,
         trapdoor_sampler,
@@ -281,10 +276,9 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         DCRTPolyTrapdoorSampler,
         DCRTPolyUniformSampler,
     >::new(
-        config.l1_moduli_bits,
+        config.p_moduli_bits,
         config.scale,
         &params,
-        config.num_eval_slots,
         config.knapsack_size,
         config.e_b_sigma,
         trapdoor_sampler,
@@ -293,8 +287,6 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     let mut t_enc = Duration::ZERO;
     let mut t_read_fsk = Duration::ZERO;
     let mut t_dec = Duration::ZERO;
-    let num_eval_slots = config.num_eval_slots.unwrap_or(params.ring_dimension() as usize);
-
     log_mem("starting KeyPolicy ABE");
 
     // 3) enc
@@ -312,14 +304,7 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     );
     let ct: Ciphertext<DCRTPolyMatrix> = timed_read(
         "enc",
-        || {
-            abe.enc(
-                params.clone(),
-                mpk,
-                &vec![vec![BigUint::ZERO; num_eval_slots]; config.arith_input_size],
-                &vec![true; num_eval_slots],
-            )
-        },
+        || abe.enc(params.clone(), mpk, &vec![BigUint::ZERO; config.arith_input_size], true),
         &mut t_enc,
     );
     log_mem("finished enc");

@@ -11,7 +11,7 @@ use mxx::{
     },
     circuit::PolyCircuit,
     element::PolyElem,
-    gadgets::arith::nested_crt::{NestedCrtPoly, NestedCrtPolyContext, encode_nested_crt_poly},
+    gadgets::arith::nested_rns::{NestedRnsPoly, NestedRnsPolyContext, encode_nested_rns_poly},
     lookup::lwe_eval::{LweBggEncodingPltEvaluator, LweBggPubKeyEvaluator},
     matrix::PolyMatrix,
     poly::{Poly, PolyParams},
@@ -30,11 +30,10 @@ pub struct KeyPolicyABE<
     SU: PolyUniformSampler<M = M> + Send + Sync,
 > {
     pub e_b_sigma: f64,
-    pub l1_moduli_bits: usize,
-    pub l1_moduli_depth: usize,
+    pub p_moduli_bits: usize,
+    pub p_moduli_depth: usize,
     pub scale: u64,
     pub crt_depth: usize,
-    pub num_eval_slots: usize,
     pub knapsack_size: Option<usize>,
     pub trapdoor_sampler: ST,
     _sh: PhantomData<SH>,
@@ -49,23 +48,22 @@ impl<
 > KeyPolicyABE<M, SH, ST, SU>
 {
     pub fn new(
-        l1_moduli_bits: usize,
+        p_moduli_bits: usize,
         scale: u64,
         params: &<M::P as Poly>::Params,
-        num_eval_slots: Option<usize>,
         knapsack_size: Option<usize>,
         e_b_sigma: f64,
         trapdoor_sampler: ST,
     ) -> Self {
+        assert!(p_moduli_bits > 1, "p_moduli_bits must be at least 2 for NestedRns");
         let (_, crt_bits, crt_depth) = params.to_crt();
-        let l1_moduli_depth = (2 * crt_bits).div_ceil(l1_moduli_bits);
-        let num_eval_slots = num_eval_slots.unwrap_or(params.ring_dimension() as usize);
+        // NestedRns chooses the number of level-1 moduli as ceil(2 * |q_bits| / (p_bits - 1))
+        let p_moduli_depth = (2 * crt_bits).div_ceil(p_moduli_bits - 1);
         Self {
-            l1_moduli_bits,
-            l1_moduli_depth,
+            p_moduli_bits,
+            p_moduli_depth,
             scale,
             crt_depth,
-            num_eval_slots,
             knapsack_size,
             e_b_sigma,
             trapdoor_sampler,
@@ -94,14 +92,19 @@ impl<
         &self,
         params: <M::P as Poly>::Params,
         mpk: MasterPK<M>,
-        inputs: &[Vec<BigUint>],
-        message: &[bool],
+        inputs: &[BigUint],
+        message: bool,
     ) -> Ciphertext<M> {
         let num_inputs = inputs.len();
+        assert_eq!(
+            num_inputs, mpk.num_inputs,
+            "provided inputs ({num_inputs}) must match mpk.num_inputs ({})",
+            mpk.num_inputs
+        );
         let uniform_sampler = SU::new();
         let s = uniform_sampler.sample_uniform(&params, 1, 1, DistType::TernaryDist);
         let b_col_size = 2 + params.modulus_digits();
-        let c_b_error = {
+        let c_b_error: M = {
             let first_part = uniform_sampler.sample_uniform(
                 &params,
                 1,
@@ -120,15 +123,21 @@ impl<
         };
         let c_b = s.clone() * mpk.b_matrix.as_ref() + &c_b_error;
         let bgg_encoding_sampler = BGGEncodingSampler::<SU>::new(&params, &s.get_row(0), None);
+        // let (_, _, crt_depth) = params.to_crt();
+        // let p_moduli_depth = (2 * crt_bits).div_ceil(self.p_moduli_bits - 1);
         let plaintexts = inputs
             .iter()
-            .flat_map(|input| {
-                assert_eq!(input.len(), self.num_eval_slots);
-                encode_nested_crt_poly(self.l1_moduli_bits, &params, input)
-            })
+            .flat_map(|input| encode_nested_rns_poly(self.p_moduli_bits, &params, input))
             .collect::<Vec<_>>();
-        let num_given_input_polys = num_inputs * self.l1_moduli_depth;
-        let reveal_plaintexts = vec![true; num_given_input_polys + 1];
+        // let expected_plaintexts = mpk.num_inputs * crt_depth * self.p_moduli_depth;
+        // assert_eq!(
+        //     plaintexts.len(),
+        //     expected_plaintexts,
+        //     "plaintext count ({}) must equal num_inputs * crt_depth * p_moduli_depth ({})",
+        //     plaintexts.len(),
+        //     expected_plaintexts
+        // );
+        let reveal_plaintexts = vec![true; plaintexts.len()];
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, 1);
         let pubkeys = bgg_pubkey_sampler.sample(&params, TAG_BGG_PUBKEY, &reveal_plaintexts);
         let bgg_encodings_no_error = bgg_encoding_sampler.sample(&params, &pubkeys, &plaintexts);
@@ -166,14 +175,13 @@ impl<
                 }
             })
             .collect::<Vec<_>>();
-        let ring_dim = params.ring_dimension() as usize;
-        assert_eq!(message.len(), self.num_eval_slots, "message length must match num_eval_slots",);
-        let mut message_coeffs: Vec<BigUint> =
-            message.iter().map(|bit| BigUint::from(*bit as u8)).collect();
-        if message_coeffs.len() < ring_dim {
-            message_coeffs.resize(ring_dim, BigUint::from(0u8));
-        }
-        let message_poly = M::P::from_biguints(&params, &message_coeffs);
+        // let ring_dim = params.ring_dimension() as usize;
+        // let mut message_coeffs: Vec<BigUint> =
+        //     message.iter().map(|bit| BigUint::from(*bit as u8)).collect();
+        // if message_coeffs.len() < ring_dim {
+        //     message_coeffs.resize(ring_dim, BigUint::from(0u8));
+        // }
+        let message_poly = M::P::from_usize_to_constant(&params, message as usize);
         let half_q = <M::P as Poly>::Elem::half_q(&params.modulus());
         let half_const = M::P::from_elem_to_constant(&params, &half_q);
         let scaled_message = message_poly * half_const;
@@ -199,15 +207,19 @@ impl<
         init_storage_system();
         let circuit = {
             let mut circuit = PolyCircuit::<M::P>::new();
-            let ctx = Arc::new(NestedCrtPolyContext::setup(
+            let ctx = Arc::new(NestedRnsPolyContext::setup(
                 &mut circuit,
                 &params,
-                self.l1_moduli_bits,
+                self.p_moduli_bits,
                 self.scale,
-                self.num_eval_slots,
                 false,
             ));
-            NestedCrtPoly::benchmark_multiplication_tree(ctx, &mut circuit, height as usize);
+            NestedRnsPoly::benchmark_multiplication_tree(
+                ctx,
+                &params,
+                &mut circuit,
+                height as usize,
+            );
             circuit
         };
         let plt_evaluator = LweBggPubKeyEvaluator::<M, SH, ST>::new(
@@ -217,10 +229,7 @@ impl<
             msk.b_trapdoor.clone(),
             dir_path.clone(),
         );
-        let num_inputs =
-            1usize.checked_shl(height as u32).expect("height is too large to represent 2^h inputs");
-        let num_given_input_polys = num_inputs * self.l1_moduli_depth;
-        let reveal_plaintexts = vec![true; num_given_input_polys + 1];
+        let reveal_plaintexts = vec![true; circuit.num_input()];
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, SH>::new(mpk.seed, 1);
         let pubkeys = bgg_pubkey_sampler.sample(&params, TAG_BGG_PUBKEY, &reveal_plaintexts);
         let result = circuit.eval(&params, &pubkeys[0], &pubkeys[1..], Some(plt_evaluator));
@@ -251,18 +260,27 @@ impl<
         init_storage_system();
         let circuit = {
             let mut circuit = PolyCircuit::<M::P>::new();
-            let ctx = Arc::new(NestedCrtPolyContext::setup(
+            let ctx = Arc::new(NestedRnsPolyContext::setup(
                 &mut circuit,
                 &params,
-                self.l1_moduli_bits,
+                self.p_moduli_bits,
                 self.scale,
-                self.num_eval_slots,
                 false,
             ));
-            NestedCrtPoly::benchmark_multiplication_tree(ctx, &mut circuit, height as usize);
+            NestedRnsPoly::benchmark_multiplication_tree(
+                ctx,
+                &params,
+                &mut circuit,
+                height as usize,
+            );
             circuit
         };
         let encodings = &ct.bgg_encodings[..];
+        assert_eq!(
+            encodings.len(),
+            circuit.num_input() + 1,
+            "ciphertext must contain exactly 1 + circuit.num_input() encodings"
+        );
         let dir_path: PathBuf = fsk.dir_path;
         let bgg_evaluator =
             LweBggEncodingPltEvaluator::<M, SH>::new(mpk.seed, dir_path, ct.c_b.clone());
