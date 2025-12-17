@@ -81,6 +81,7 @@ jobs:
         env:
           LD_LIBRARY_PATH: /usr/local/lib
           RUST_LOG: info
+          RUST_BACKTRACE: 1
         run: |
           mkdir -p logs
 
