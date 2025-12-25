@@ -14,7 +14,7 @@ use mxx::{
     matrix::dcrt_poly::DCRTPolyMatrix,
     poly::dcrt::params::DCRTPolyParams,
     sampler::{
-        PolyTrapdoorSampler, hash::DCRTPolyHashSampler, trapdoor::DCRTPolyTrapdoorSampler,
+        hash::DCRTPolyHashSampler, trapdoor::DCRTPolyTrapdoorSampler,
         uniform::DCRTPolyUniformSampler,
     },
     utils::{log_mem, timed_read, timed_read_async},
@@ -203,8 +203,7 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         config.crt_bits as usize,
         config.base_bits,
     );
-    let trapdoor_sampler =
-        DCRTPolyTrapdoorSampler::new(&params, config.trapdoor_sigma.expect("trapdoor sigma exist"));
+    let trapdoor_sigma = config.trapdoor_sigma.expect("trapdoor sigma exist");
     let abe = KeyPolicyABE::<
         DCRTPolyMatrix,
         DCRTPolyHashSampler<Keccak256>,
@@ -216,7 +215,7 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         &params,
         config.knapsack_size,
         config.e_b_sigma,
-        trapdoor_sampler,
+        trapdoor_sigma,
     );
     let mut t_setup = Duration::ZERO;
     let mut t_keygen = Duration::ZERO;
@@ -226,7 +225,7 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     // 1) setup
     log_mem("starting setup");
     let (mpk, msk): (MasterPK<DCRTPolyMatrix>, MasterSK<DCRTPolyMatrix, DCRTPolyTrapdoorSampler>) =
-        timed_read("setup", || abe.setup(params.clone(), config.arith_input_size), &mut t_setup);
+        timed_read("setup", || abe.setup(&params, config.arith_input_size), &mut t_setup);
     log_mem("finished setup");
 
     let dir_path = if data_dir.exists() {
@@ -239,15 +238,7 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     log_mem("starting keygen");
     let fsk: FuncSK<DCRTPolyMatrix> = timed_read_async(
         "keygen",
-        || {
-            abe.keygen(
-                params.clone(),
-                mpk.clone(),
-                msk.clone(),
-                config.arith_height,
-                dir_path.clone(),
-            )
-        },
+        || abe.keygen(&params, mpk.clone(), msk.clone(), config.arith_height, dir_path.clone()),
         &mut t_keygen,
     )
     .await;
@@ -268,8 +259,7 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         config.crt_bits as usize,
         config.base_bits,
     );
-    let trapdoor_sampler =
-        DCRTPolyTrapdoorSampler::new(&params, config.trapdoor_sigma.expect("trapdoor sigma exist"));
+    let trapdoor_sigma = config.trapdoor_sigma.expect("trapdoor sigma exist");
     let abe = KeyPolicyABE::<
         DCRTPolyMatrix,
         DCRTPolyHashSampler<Keccak256>,
@@ -281,7 +271,7 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         &params,
         config.knapsack_size,
         config.e_b_sigma,
-        trapdoor_sampler,
+        trapdoor_sigma,
     );
     let mut t_read_mpk = Duration::ZERO;
     let mut t_enc = Duration::ZERO;
@@ -304,7 +294,7 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     );
     let ct: Ciphertext<DCRTPolyMatrix> = timed_read(
         "enc",
-        || abe.enc(params.clone(), mpk, &vec![BigUint::ZERO; config.arith_input_size], true),
+        || abe.enc(&params, mpk, &vec![BigUint::ZERO; config.arith_input_size], true),
         &mut t_enc,
     );
     log_mem("finished enc");
@@ -333,11 +323,8 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         },
         &mut t_read_fsk,
     );
-    let bit: bool = timed_read(
-        "dec",
-        || abe.dec(params.clone(), ct, mpk, fsk, config.arith_height),
-        &mut t_dec,
-    );
+    let bit: bool =
+        timed_read("dec", || abe.dec(&params, ct, mpk, fsk, config.arith_height), &mut t_dec);
     log_mem(format!("finished decryption: result={}", bit));
     Ok(())
 }
