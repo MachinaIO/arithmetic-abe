@@ -1,4 +1,5 @@
 use bigdecimal::{BigDecimal, FromPrimitive, One};
+use log::info;
 pub use mxx::simulator::lattice_estimator::run_lattice_estimator_cli;
 use mxx::{
     circuit::PolyCircuit,
@@ -13,7 +14,7 @@ use mxx::{
         lattice_estimator::{Distribution, EstimatorCliError},
         poly_matrix_norm::PolyMatrixNorm,
     },
-    utils::{bigdecimal_bits_ceil, log_mem},
+    utils::bigdecimal_bits_ceil,
 };
 use num_bigint::BigUint;
 use rayon::prelude::*;
@@ -216,7 +217,7 @@ pub fn bruteforce_params_for_bench_nested_crt_circuit(
                         let scale = 1<<scale_bits;
                         let ctx = Arc::new(NestedRnsPolyContext::setup(&mut circuit, &params, p_moduli_bits, scale, true));
                         log::info!("ctx constructed with crt_depth = {}, log_dim = {}, base_bits = {}, knapsack_size = {}, e_b_log_alpha = {}", crt_depth, log_dim, base_bits, knapsack_size, e_b_log_alpha);
-                        NestedRnsPoly::benchmark_multiplication_tree(ctx, &params,&mut circuit, height);
+                        NestedRnsPoly::benchmark_multiplication_tree(ctx, &mut circuit, height,None);
                         circuit
                     };
                     log::info!("circuit constructed with crt_depth = {}, log_dim = {}, base_bits = {}, knapsack_size = {}, e_b_log_alpha = {}", crt_depth, log_dim, base_bits, knapsack_size, e_b_log_alpha);
@@ -453,14 +454,14 @@ fn check_correctness(
     );
     let e_a = &e_b * &r_mat;
     log::info!("before simulation: e_b = {:?}, e_a = {:?}", e_b, e_a);
-    let plt_evaluator = NormPltGGH15Evaluator::new(sim_ctx.clone(), &e_b_sigma);
-    let preimage_norm = plt_evaluator.k_g.poly_norm.norm.clone();
+    let plt_evaluator = NormPltGGH15Evaluator::new(sim_ctx.clone(), &e_b_sigma, &e_b_sigma, None);
+    let preimage_norm = compute_preimage_norm(&sim_ctx.ring_dim_sqrt, m_g as u64, &sim_ctx.base);
     let out_errors = circuit.simulate_max_error_norm(
         sim_ctx.clone(),
         input_norm_bound,
         input_size,
         &e_a.poly_norm.norm,
-        Some(plt_evaluator),
+        Some(&plt_evaluator),
     );
     log::info!("after simulation");
     // let max_out_error = out_errors
@@ -529,7 +530,7 @@ fn check_correctness(
         BigDecimal::from_u32(4).unwrap();
     let q_over_4_bits = bigdecimal_bits_ceil(&q_over_4);
     if q_over_4 > e_final.poly_norm.norm {
-        log_mem(format!("q_over_4_bits: {}, e_final_bits: {}", q_over_4_bits, e_final_bits));
+        info!("q_over_4_bits: {}, e_final_bits: {}", q_over_4_bits, e_final_bits);
         Ok(log_q * m_g as u32)
     } else {
         Err(SimulatorError::NotCorrect { e_bits: e_final_bits, q_over_4_bits })

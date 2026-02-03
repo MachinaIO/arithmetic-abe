@@ -12,15 +12,16 @@ use clap::{Parser, Subcommand};
 use keccak_asm::Keccak256;
 use mxx::{
     matrix::dcrt_poly::DCRTPolyMatrix,
-    poly::dcrt::params::DCRTPolyParams,
+    poly::{PolyParams, dcrt::params::DCRTPolyParams},
     sampler::{
         hash::DCRTPolyHashSampler, trapdoor::DCRTPolyTrapdoorSampler,
         uniform::DCRTPolyUniformSampler,
     },
-    utils::{log_mem, timed_read, timed_read_async},
+    utils::{gen_biguint_for_modulus, timed_read, timed_read_async},
 };
 use num_bigint::BigUint;
 use std::{env, fs, path::PathBuf, time::Duration};
+use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Parser, Debug)]
@@ -70,7 +71,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::BenchSim { config } => {
-            log_mem(format!("Loading simulator config: path={}", config.display()));
+            info!("Loading simulator config: path={}", config.display());
             let config_prefix = config
                 .file_name()
                 .map(|os| os.to_string_lossy().into_owned())
@@ -83,7 +84,7 @@ async fn main() -> Result<()> {
             run_bench_sim(sim_config, config_prefix)?;
         }
         Commands::BenchRunOffline { config, data_dir } => {
-            log_mem(format!("Loading run config: path={}", config.display()));
+            info!("Loading run config: path={}", config.display());
             let contents = fs::read_to_string(&config)
                 .with_context(|| format!("failed to read run config from {}", config.display()))?;
             let run_config: RunConfig = toml::from_str(&contents)
@@ -91,7 +92,7 @@ async fn main() -> Result<()> {
             run_bench_offline(run_config, data_dir).await?;
         }
         Commands::BenchRunOnline { config, data_dir } => {
-            log_mem(format!("Loading run config: path={}", config.display()));
+            info!("Loading run config: path={}", config.display());
             let contents = fs::read_to_string(&config)
                 .with_context(|| format!("failed to read run config from {}", config.display()))?;
             let run_config: RunConfig = toml::from_str(&contents)
@@ -122,7 +123,7 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         height,
     } = config;
 
-    log_mem(format!(
+    info!(
         "Starting benchmark parameter search: target_secpar={}, crt_bits={}, crt_depth_range=({}-{}), base_bits_range=({}-{}), log_dim_range=({}-{}), p_moduli_bits={}, scale_bits = {}, height={}, config_prefix={}",
         target_secpar,
         crt_bits,
@@ -136,7 +137,7 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         scale_bits,
         height,
         config_prefix
-    ));
+    );
 
     let params = bruteforce_params_for_bench_nested_crt_circuit(
         target_secpar,
@@ -159,10 +160,10 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
         .checked_shl(arith_height)
         .context("arith_height is too large for usize input size")?;
 
-    log_mem(format!(
+    info!(
         "Benchmark parameter search succeeded: crt_depth={}, base_bits={}, log_dim={}, e_b_sigma={}, knapsack_size={}, ring_dimension={}, arith_input_size={}",
         crt_depth, base_bits, log_dim, e_b_sigma, knapsack_size, ring_dimension, arith_input_size
-    ));
+    );
 
     let config_id = format!("{}_{}", config_prefix, Local::now().format("%Y%m%d-%H%M%S"));
     let run_config = RunConfig {
@@ -191,7 +192,7 @@ fn run_bench_sim(config: SimConfig, config_prefix: String) -> Result<()> {
     fs::write(&output_path, toml)
         .with_context(|| format!("failed to write config file to {}", output_path.display()))?;
 
-    log_mem(format!("Wrote benchmark config: path={}", output_path.display()));
+    info!("Wrote benchmark config: path={}", output_path.display());
 
     Ok(())
 }
@@ -220,13 +221,13 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     let mut t_setup = Duration::ZERO;
     let mut t_keygen = Duration::ZERO;
 
-    log_mem("starting KeyPolicy ABE");
+    info!("starting KeyPolicy ABE");
 
     // 1) setup
-    log_mem("starting setup");
+    info!("starting setup");
     let (mpk, msk): (MasterPK<DCRTPolyMatrix>, MasterSK<DCRTPolyMatrix, DCRTPolyTrapdoorSampler>) =
         timed_read("setup", || abe.setup(&params, config.arith_input_size), &mut t_setup);
-    log_mem("finished setup");
+    info!("finished setup");
 
     let dir_path = if data_dir.exists() {
         data_dir
@@ -235,19 +236,19 @@ async fn run_bench_offline(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         data_dir
     };
     // 2) keygen
-    log_mem("starting keygen");
+    info!("starting keygen");
     let fsk: FuncSK<DCRTPolyMatrix> = timed_read_async(
         "keygen",
         || abe.keygen(&params, mpk.clone(), msk.clone(), config.arith_height, dir_path.clone()),
         &mut t_keygen,
     )
     .await;
-    log_mem("finished keygen");
+    info!("finished keygen");
 
-    log_mem("starting writing mpk and fsk files");
+    info!("starting writing mpk and fsk files");
     mpk.write(dir_path.join(format!("{}.mpk", config.config_id)))?;
     fsk.write(dir_path.join(format!("{}.fsk", config.config_id)))?;
-    log_mem("finished writing mpk and fsk files");
+    info!("finished writing mpk and fsk files");
 
     Ok(())
 }
@@ -277,10 +278,17 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     let mut t_enc = Duration::ZERO;
     let mut t_read_fsk = Duration::ZERO;
     let mut t_dec = Duration::ZERO;
-    log_mem("starting KeyPolicy ABE");
+
+    let mut inputs = vec![BigUint::ZERO; config.arith_input_size];
+    let mut rng = rand::rng();
+    for i in 1..inputs.len() {
+        inputs[i] = gen_biguint_for_modulus(&mut rng, &params.modulus());
+    }
+
+    info!("starting KeyPolicy ABE");
 
     // 3) enc
-    log_mem("starting enc");
+    info!("starting enc");
     let mpk = timed_read(
         "read mpk",
         || {
@@ -292,14 +300,11 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
         },
         &mut t_read_mpk,
     );
-    let ct: Ciphertext<DCRTPolyMatrix> = timed_read(
-        "enc",
-        || abe.enc(&params, mpk, &vec![BigUint::ZERO; config.arith_input_size], true),
-        &mut t_enc,
-    );
-    log_mem("finished enc");
+    let ct: Ciphertext<DCRTPolyMatrix> =
+        timed_read("enc", || abe.enc(&params, mpk, &inputs, true), &mut t_enc);
+    info!("finished enc");
     // 4) dec
-    log_mem("starting dec");
+    info!("starting dec");
     t_read_mpk = Duration::ZERO;
     let mpk = timed_read(
         "read mpk",
@@ -325,6 +330,6 @@ async fn run_bench_online(config: RunConfig, data_dir: PathBuf) -> Result<()> {
     );
     let bit: bool =
         timed_read("dec", || abe.dec(&params, ct, mpk, fsk, config.arith_height), &mut t_dec);
-    log_mem(format!("finished decryption: result={}", bit));
+    info!("finished decryption: result={}", bit);
     Ok(())
 }

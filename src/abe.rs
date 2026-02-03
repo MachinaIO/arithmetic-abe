@@ -208,7 +208,7 @@ impl<
         height: u32,
         dir_path: PathBuf,
     ) -> FuncSK<M> {
-        init_storage_system();
+        init_storage_system(dir_path.clone());
         let circuit = {
             let mut circuit = PolyCircuit::<M::P>::new();
             let ctx = Arc::new(NestedRnsPolyContext::setup(
@@ -218,14 +218,16 @@ impl<
                 self.scale,
                 false,
             ));
-            NestedRnsPoly::benchmark_multiplication_tree(
-                ctx,
-                params,
-                &mut circuit,
-                height as usize,
-            );
+            info!("constructed NestedRnsPolyContext");
+            NestedRnsPoly::benchmark_multiplication_tree(ctx, &mut circuit, height as usize, None);
             circuit
         };
+        info!(
+            "constructed circuit with {} inputs, {} gates, and {} non-free depth",
+            circuit.num_input(),
+            circuit.num_gates(),
+            circuit.non_free_depth()
+        );
         let plt_evaluator = GGH15BGGPubKeyPltEvaluator::<M, US, HS, TS>::new(
             mpk.seed,
             self.trapdoor_sigma,
@@ -236,13 +238,21 @@ impl<
             dir_path.clone(),
             false,
         );
+        info!("constructed plt_evaluator");
         let reveal_plaintexts = vec![true; circuit.num_input()];
         let bgg_pubkey_sampler = BGGPublicKeySampler::<_, HS>::new(mpk.seed, 1);
         let pubkeys = bgg_pubkey_sampler.sample(&params, TAG_BGG_PUBKEY, &reveal_plaintexts);
-        let result = circuit.eval(params, &pubkeys[0], &pubkeys[1..], Some(plt_evaluator));
+        info!("sampled pubkeys");
+        info!("starting evaluation of pubkeys");
+        let result = circuit.eval(params, &pubkeys[0], &pubkeys[1..], Some(&plt_evaluator));
         info!("finished evaluation of pubkeys");
+        info!("starting sample_all_preimages");
+        let sample_all_start = std::time::Instant::now();
+        plt_evaluator.sample_aux_matrices(&params);
+        info!("finished sample_all_preimages in {:?}", sample_all_start.elapsed());
+        info!("starting wait_for_all_writes");
         wait_for_all_writes(dir_path.clone()).await.unwrap();
-        info!("finished write files");
+        info!("finished wait_for_all_writes");
 
         let a_f = result[0].clone().matrix;
         let trapdoor_sampler = TS::new(params, self.trapdoor_sigma);
@@ -260,7 +270,7 @@ impl<
         fsk: FuncSK<M>,
         height: u32,
     ) -> bool {
-        init_storage_system();
+        init_storage_system(fsk.dir_path.clone());
         let circuit = {
             let mut circuit = PolyCircuit::<M::P>::new();
             let ctx = Arc::new(NestedRnsPolyContext::setup(
@@ -270,12 +280,7 @@ impl<
                 self.scale,
                 false,
             ));
-            NestedRnsPoly::benchmark_multiplication_tree(
-                ctx,
-                params,
-                &mut circuit,
-                height as usize,
-            );
+            NestedRnsPoly::benchmark_multiplication_tree(ctx, &mut circuit, height as usize, None);
             circuit
         };
         let encodings = &ct.bgg_encodings[..];
@@ -292,7 +297,7 @@ impl<
             mpk.b_matrix.row_size(),
             ct.c_b.clone(),
         );
-        let result = circuit.eval(params, &encodings[0], &encodings[1..], Some(bgg_evaluator));
+        let result = circuit.eval(params, &encodings[0], &encodings[1..], Some(&bgg_evaluator));
         // 5. Let `c_f := s^T*A_f + e_{c_f}` in $\mathcal{R}_{q}^{1 \times m}$
         // be the BGG+ encoding corresponding to the output wire of `poly_circuit`.
         let v = ct.c_b.concat_columns(&[&result[0].vector]) * fsk.u_f;
