@@ -454,7 +454,9 @@ fn check_correctness(
     );
     let e_a = &e_b * &r_mat;
     log::info!("before simulation: e_b = {:?}, e_a = {:?}", e_b, e_a);
-    let plt_evaluator = NormPltGGH15Evaluator::new(sim_ctx.clone(), &e_b_sigma, &e_b_sigma, None);
+    let tree_base = 2;
+    let plt_evaluator =
+        NormPltCommitEvaluator::new(sim_ctx.clone(), &e_b_sigma, tree_base, circuit);
     let preimage_norm = compute_preimage_norm(&sim_ctx.ring_dim_sqrt, m_g as u64, &sim_ctx.base);
     let out_errors = circuit.simulate_max_error_norm(
         sim_ctx.clone(),

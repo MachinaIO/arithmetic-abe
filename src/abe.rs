@@ -12,7 +12,7 @@ use mxx::{
     circuit::PolyCircuit,
     element::PolyElem,
     gadgets::arith::nested_rns::{NestedRnsPoly, NestedRnsPolyContext, encode_nested_rns_poly},
-    lookup::ggh15_eval::{GGH15BGGEncodingPltEvaluator, GGH15BGGPubKeyPltEvaluator},
+    lookup::commit_eval::{CommitBGGEncodingPltEvaluator, CommitBGGPubKeyPltEvaluator},
     matrix::PolyMatrix,
     poly::{Poly, PolyParams},
     sampler::{DistType, PolyHashSampler, PolyTrapdoorSampler, PolyUniformSampler},
@@ -223,20 +223,19 @@ impl<
             circuit
         };
         info!(
-            "constructed circuit with {} inputs, {} gates, and {} non-free depth",
+            "constructed circuit with {} inputs, {:?} gates, and {} non-free depth",
             circuit.num_input(),
-            circuit.num_gates(),
+            circuit.count_gates_by_type_vec(),
             circuit.non_free_depth()
         );
-        let plt_evaluator = GGH15BGGPubKeyPltEvaluator::<M, US, HS, TS>::new(
-            mpk.seed,
-            self.trapdoor_sigma,
-            self.e_b_sigma,
+        let tree_base = 2;
+        let secret_size = mpk.b_matrix.row_size();
+        let plt_evaluator = CommitBGGPubKeyPltEvaluator::<M, HS>::setup::<US, TS>(
             &params,
-            mpk.b_matrix.clone(),
-            msk.b_trapdoor.clone(),
-            dir_path.clone(),
-            false,
+            secret_size,
+            self.trapdoor_sigma,
+            tree_base,
+            mpk.seed,
         );
         info!("constructed plt_evaluator");
         let reveal_plaintexts = vec![true; circuit.num_input()];
@@ -246,10 +245,14 @@ impl<
         info!("starting evaluation of pubkeys");
         let result = circuit.eval(params, &pubkeys[0], &pubkeys[1..], Some(&plt_evaluator));
         info!("finished evaluation of pubkeys");
-        info!("starting sample_all_preimages");
-        let sample_all_start = std::time::Instant::now();
-        plt_evaluator.sample_aux_matrices(&params);
-        info!("finished sample_all_preimages in {:?}", sample_all_start.elapsed());
+        info!("starting commit_all_lut_matrices");
+        let commit_all_start = std::time::Instant::now();
+        plt_evaluator.commit_all_lut_matrices::<TS>(
+            &params,
+            mpk.b_matrix.as_ref(),
+            msk.b_trapdoor.as_ref(),
+        );
+        info!("finished commit_all_lut_matrices in {:?}", commit_all_start.elapsed());
         info!("starting wait_for_all_writes");
         wait_for_all_writes(dir_path.clone()).await.unwrap();
         info!("finished wait_for_all_writes");
@@ -290,12 +293,20 @@ impl<
             "ciphertext must contain exactly 1 + circuit.num_input() encodings"
         );
         let dir_path: PathBuf = fsk.dir_path;
-        let bgg_evaluator = GGH15BGGEncodingPltEvaluator::<M, HS>::new(
-            mpk.seed,
+        let tree_base = 2;
+        let one_pubkey = encodings[0].pubkey.clone();
+        let input_pubkeys =
+            encodings[1..].iter().map(|encoding| encoding.pubkey.clone()).collect::<Vec<_>>();
+        let bgg_evaluator = CommitBGGEncodingPltEvaluator::<M, HS>::setup(
             &params,
-            dir_path,
-            mpk.b_matrix.row_size(),
-            ct.c_b.clone(),
+            tree_base,
+            mpk.seed,
+            &circuit,
+            &one_pubkey,
+            &input_pubkeys,
+            &ct.c_b,
+            &ct.c_b,
+            &dir_path,
         );
         let result = circuit.eval(params, &encodings[0], &encodings[1..], Some(&bgg_evaluator));
         // 5. Let `c_f := s^T*A_f + e_{c_f}` in $\mathcal{R}_{q}^{1 \times m}$

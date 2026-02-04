@@ -678,7 +678,7 @@ dependencies = [
 [[package]]
 name = "mxx"
 version = "0.1.0"
-source = "git+https://github.com/MachinaIO/mxx.git?branch=main#e53d03029298982a3e2cc5931571a403eb988be2"
+source = "git+https://github.com/MachinaIO/mxx.git?branch=feat%2Fcommit_lookup_eval_simu#5bcb3866947a1563e4c6fac627ba18d56127fa46"
 dependencies = [
  "bigdecimal",
  "bincode",
